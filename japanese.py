@@ -10,7 +10,8 @@ import requests
 from shared import all_exercises
 
 parser = argparse.ArgumentParser()
-parser.add_argument('-w', '--words', action='store_true')
+parser.add_argument('-w', '--words', action='store_true', help='Use cloze words instead of entire sentences')
+parser.add_argument('-p', '--playing', action='store_true', help='Limit to sentences which I am playing')
 parser.add_argument('command', type=str)
 parser.add_argument('args', type=str, nargs='*')
 
@@ -249,7 +250,13 @@ def print_nonstandard(cc: CharacterCounts):
             print()
 
 
+def reload_sentences(_: CharacterCounts):
+    exercises = all_exercises('jpn-eng', force_reload=True)
+    print(f"{len(exercises)} sentences downloaded.")
+
+
 DISPATCH_TABLE: dict[str, Callable[[CharacterCounts, ...], None]] = {
+    'reload': reload_sentences,
     'joyo_stats': joyo_stats,
     'ctypes': print_ctype_counts,
     'nonstandard': print_nonstandard,
@@ -262,6 +269,12 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     exercises = all_exercises("jpn-eng")
+    if args.playing:
+        exercises = [
+            e for e in exercises
+            if e.numPlayed > 0
+        ]
+
     mapf = (lambda e: e.word()) if args.words else (lambda e: e.sentence())
     strings = list(map(mapf, exercises))
 

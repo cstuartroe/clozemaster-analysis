@@ -118,12 +118,12 @@ def get_all(course: str) -> list[Exercise]:
     return exercises
 
 
-def all_exercises(course: str) -> list[Exercise]:
+def all_exercises(course: str, force_reload: bool = False) -> list[Exercise]:
     os.makedirs("exercises", exist_ok=True)
 
     course_file = f"exercises/{course}.json"
 
-    if not os.path.exists(course_file):
+    if force_reload or not os.path.exists(course_file):
         exercises = get_all(course)
 
         with open(course_file, "w") as fh:
@@ -146,5 +146,6 @@ def all_exercises(course: str) -> list[Exercise]:
             ]
 
     return exercises
+
 
 all_exercises('ind-eng')
