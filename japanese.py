@@ -213,16 +213,17 @@ def joyo_stats(cc: CharacterCounts):
 
 def print_ctype_counts(cc: CharacterCounts):
     for t, n in sorted(list(cc.ctype_counts.items()), key=lambda x: x[1]):
-        print(f"{t:<20} {n:>6}")
+        print(f"{t.value:<20} {n:>6}")
 
 
-def export_frequencies(cc: CharacterCounts, ctype: CharacterType):
-    dirname = f'frequency/{ctype.value}/jpn-eng'
-    os.makedirs(dirname, exist_ok=True)
-    for ct in CharacterType:
-        with open(os.path.join(dirname, f'{ct.value}.txt'), 'w') as fh:
-            for w, f in sorted(list(cc.ccounts[ct].items()), key=lambda x: x[1], reverse=True):
-                fh.write(f"{w}\t{f}\n")
+def export_frequencies(cc: CharacterCounts):
+    for ctype in CharacterType:
+        dirname = f'frequency/{ctype.value}/jpn-eng'
+        os.makedirs(dirname, exist_ok=True)
+        for ct in CharacterType:
+            with open(os.path.join(dirname, f'{ct.value}.txt'), 'w') as fh:
+                for w, f in sorted(list(cc.ccounts[ct].items()), key=lambda x: x[1], reverse=True):
+                    fh.write(f"{w}\t{f}\n")
 
 
 def print_most_common(cc: CharacterCounts, ctype: str, limit: str = '100'):
@@ -241,8 +242,11 @@ NORMAL_CTYPES = (CharacterType.KANJI, CharacterType.HIRAGANA, CharacterType.KATA
 
 def print_nonstandard(cc: CharacterCounts):
     for s in cc.strings:
-        if any(ctype(c) not in NORMAL_CTYPES for c in s):
+        nonstandard = [c for c in s if ctype(c) not in NORMAL_CTYPES]
+        if nonstandard:
             print(s)
+            print(','.join(nonstandard))
+            print()
 
 
 DISPATCH_TABLE: dict[str, Callable[[CharacterCounts, ...], None]] = {
