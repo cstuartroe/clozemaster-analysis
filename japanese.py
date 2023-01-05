@@ -1,3 +1,5 @@
+import argparse
+from dataclasses import dataclass
 from enum import Enum
 import os
 from typing import Callable
@@ -5,7 +7,12 @@ from typing import Callable
 from bs4 import BeautifulSoup as bs
 import requests
 
-from shared import Exercise, all_exercises
+from shared import all_exercises
+
+parser = argparse.ArgumentParser()
+parser.add_argument('-w', '--words', action='store_true')
+parser.add_argument('command', type=str)
+parser.add_argument('args', type=str, nargs='*')
 
 
 def load_secondary_joyo():
@@ -157,30 +164,35 @@ def load_joyo(max_level=6) -> set[str]:
             return out
 
 
-def kanji_stats(exercises: list[Exercise], focus: Callable[[Exercise], str], title: str):
-    print(f"For {title}\n")
+@dataclass
+class CharacterCounts:
+    strings: list[str]
+    ccounts: dict[CharacterType, dict[str, int]]
+    ctype_counts: dict[CharacterType, int]
 
-    ctypes = {}
-    ccounts: dict[CharacterType, dict[str, int]] = {
-        ct: {}
-        for ct in CharacterType
-    }
+    @classmethod
+    def count_strings(cls, strings: list[str]) -> "CharacterCounts":
+        ccounts: dict[CharacterType, dict[str, int]] = {
+            ct: {}
+            for ct in CharacterType
+        }
+        ctype_counts: dict[CharacterType, int] = {}
 
-    for e in exercises:
-        # print(e.text)
-        # print(e.sentence())
-        # print(e.word())
+        for s in strings:
+            for c in s:
+                ct = ctype(c)
+                ctype_counts[ct] = ctype_counts.get(ct, 0) + 1
+                ccounts[ct][c] = ccounts[ct].get(c, 0) + 1
 
-        for c in focus(e):
-            ct = ctype(c)
-            ctypes[ct] = ctypes.get(ct, 0) + 1
+        return cls(
+            strings=strings,
+            ccounts=ccounts,
+            ctype_counts=ctype_counts,
+        )
 
-            ccounts[ct][c] = ccounts[ct].get(c, 0) + 1
 
-            # if ct == "other":
-            #     print(c, hex(ord(c)))
-
-    kanji_counts = ccounts[CharacterType.KANJI]
+def joyo_stats(cc: CharacterCounts):
+    kanji_counts = cc.ccounts[CharacterType.KANJI]
     print(f"{len(kanji_counts)} kanji\n")
 
     for level in JOYO.keys():
@@ -198,31 +210,63 @@ def kanji_stats(exercises: list[Exercise], focus: Callable[[Exercise], str], tit
 
         print()
 
-    for t, n in sorted(list(ctypes.items()), key=lambda x: x[1]):
+
+def print_ctype_counts(cc: CharacterCounts):
+    for t, n in sorted(list(cc.ctype_counts.items()), key=lambda x: x[1]):
         print(f"{t:<20} {n:>6}")
 
-    os.makedirs(f'frequency/{title}/jpn-eng', exist_ok=True)
+
+def export_frequencies(cc: CharacterCounts, ctype: CharacterType):
+    dirname = f'frequency/{ctype.value}/jpn-eng'
+    os.makedirs(dirname, exist_ok=True)
     for ct in CharacterType:
-        with open(f'frequency/{title}/jpn-eng/{ct.value}.txt', 'w') as fh:
-            for w, f in sorted(list(ccounts[ct].items()), key=lambda x: x[1], reverse=True):
+        with open(os.path.join(dirname, f'{ct.value}.txt'), 'w') as fh:
+            for w, f in sorted(list(cc.ccounts[ct].items()), key=lambda x: x[1], reverse=True):
                 fh.write(f"{w}\t{f}\n")
 
-    print()
+
+def print_most_common(cc: CharacterCounts, ctype: str, limit: str = '100'):
+    most_common = sorted(
+        cc.ccounts[CharacterType[ctype.upper()]].items(),
+        key=lambda x: x[1],
+    )
+
+    for i in range(min(int(limit), len(most_common)), 0, -1):
+        c, count = most_common[-i]
+        print(f'{i:>5} {c} {count:>5}')
 
 
 NORMAL_CTYPES = (CharacterType.KANJI, CharacterType.HIRAGANA, CharacterType.KATAKANA, CharacterType.REPETITION)
 
 
-if __name__ == "__main__":
-    exercises = all_exercises("jpn-eng")
-    kanji_stats(exercises, lambda e: e.sentence(), "sentences")
-    kanji_stats(exercises, lambda e: e.word(), "words")
+def print_nonstandard(cc: CharacterCounts):
+    for s in cc.strings:
+        if any(ctype(c) not in NORMAL_CTYPES for c in s):
+            print(s)
 
-    print("Words with nonstandard characters:")
-    for e in exercises:
-        w = e.word()
-        if any(ctype(c) not in NORMAL_CTYPES for c in w):
-            print()
-            print(w)
-            print(e.text)
+
+DISPATCH_TABLE: dict[str, Callable[[CharacterCounts, ...], None]] = {
+    'joyo_stats': joyo_stats,
+    'ctypes': print_ctype_counts,
+    'nonstandard': print_nonstandard,
+    'export': export_frequencies,
+    'common': print_most_common,
+}
+
+
+if __name__ == "__main__":
+    args = parser.parse_args()
+
+    exercises = all_exercises("jpn-eng")
+    mapf = (lambda e: e.word()) if args.words else (lambda e: e.sentence())
+    strings = list(map(mapf, exercises))
+
+    cc = CharacterCounts.count_strings(strings)
+
+    if args.command in DISPATCH_TABLE:
+        DISPATCH_TABLE[args.command](cc, *args.args)
+    else:
+        raise ValueError(f"Invalid command: {args.command} (valid commands: {', '.join(DISPATCH_TABLE.keys())})")
+
+
 
