@@ -1,4 +1,5 @@
 from enum import Enum
+import os
 from typing import Callable
 
 from bs4 import BeautifulSoup as bs
@@ -160,7 +161,10 @@ def kanji_stats(exercises: list[Exercise], focus: Callable[[Exercise], str], tit
     print(f"For {title}\n")
 
     ctypes = {}
-    kanji_counts = {}
+    ccounts: dict[CharacterType, dict[str, int]] = {
+        ct: {}
+        for ct in CharacterType
+    }
 
     for e in exercises:
         # print(e.text)
@@ -168,15 +172,15 @@ def kanji_stats(exercises: list[Exercise], focus: Callable[[Exercise], str], tit
         # print(e.word())
 
         for c in focus(e):
-            ct = ctype(c).value
+            ct = ctype(c)
             ctypes[ct] = ctypes.get(ct, 0) + 1
 
-            if ct == "kanji":
-                kanji_counts[c] = kanji_counts.get(c, 0) + 1
+            ccounts[ct][c] = ccounts[ct].get(c, 0) + 1
 
             # if ct == "other":
             #     print(c, hex(ord(c)))
 
+    kanji_counts = ccounts[CharacterType.KANJI]
     print(f"{len(kanji_counts)} kanji\n")
 
     for level in JOYO.keys():
@@ -196,6 +200,12 @@ def kanji_stats(exercises: list[Exercise], focus: Callable[[Exercise], str], tit
 
     for t, n in sorted(list(ctypes.items()), key=lambda x: x[1]):
         print(f"{t:<20} {n:>6}")
+
+    os.makedirs(f'frequency/{title}/jpn-eng', exist_ok=True)
+    for ct in CharacterType:
+        with open(f'frequency/{title}/jpn-eng/{ct.value}.txt', 'w') as fh:
+            for w, f in sorted(list(ccounts[ct].items()), key=lambda x: x[1], reverse=True):
+                fh.write(f"{w}\t{f}\n")
 
     print()
 
