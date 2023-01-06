@@ -110,6 +110,59 @@ JOYO = {
 }
 
 
+HIRAGANA_TABLE = {
+    '': 'あいうえお',
+    'k': 'かきくけこ',
+    's': 'さしすせそ',
+    't': 'たちつてと',
+    'n': 'なにぬねの',
+    'h': 'はひふへほ',
+    'm': 'まみむめも',
+    'y': 'や ゆ よ',
+    'r': 'らりるれろ',
+    'w': 'わゐ ゑを',
+    'g': 'がぎぐげご',
+    'z': 'ざじずぜぞ',
+    'd': 'だぢづでど',
+    'b': 'ばびぶべぼ',
+    'p': 'ぱぴぷぺぽ',
+}
+
+VOWELS = 'aiueo'
+
+
+TRANSCRIPTION_REPLACEMENTS = {
+    'hu': 'fu',
+    'tu': 'tsu',
+    'du': 'zu',
+    'si': 'shi',
+    'ti': 'chi',
+    'di': 'ji',
+    'zi': 'ji',
+}
+
+
+def transcription(s: str) -> str:
+    return TRANSCRIPTION_REPLACEMENTS.get(s, s)
+
+
+HIRAGANA_TRANSCRIPTIONS: dict[str, str] = {
+    **{
+        kana: transcription(c + VOWELS[i])
+        for c, kanas in HIRAGANA_TABLE.items()
+        for i, kana in enumerate(kanas)
+        if kana != ' '
+    },
+    'ん': 'N',
+    'っ': 'Q',
+    'ゃ': '-ya',
+    'ゅ': '-yu',
+    'ょ': '-yo',
+    'ぁ': '-a',
+    'ぇ': '-e',
+}
+
+
 class CharacterType(Enum):
     ASCII = "ASCII"
     JPUNCT = "CJK punctuation"
@@ -146,6 +199,11 @@ def ctype(c: str) -> CharacterType:
         return CharacterType.ASCII
 
     return CharacterType.OTHER
+
+
+TRANSCRIPTIONS: dict[CharacterType, dict[str, str]] = {
+    CharacterType.HIRAGANA: HIRAGANA_TRANSCRIPTIONS,
+}
 
 
 WELL_TESTING_THRESHOLD = 3
@@ -200,10 +258,10 @@ def joyo_stats(cc: CharacterCounts):
         joyo = load_joyo(level)
 
         included_joyo = [j for j in joyo if j in kanji_counts]
-        print(f"{len(included_joyo)}/{len(joyo)} Joyo up to level {level} are tested")
+        print(f"{len(included_joyo)}/{len(joyo)} Joyo up to level {level} are tested: {''.join(included_joyo)}")
 
         well_tested_joyo = [j for j in joyo if (kanji_counts.get(j, 0) >= 3)]
-        print(f"{len(well_tested_joyo)}/{len(joyo)} Joyo up to level {level} are well-tested")
+        print(f"{len(well_tested_joyo)}/{len(joyo)} Joyo up to level {level} are well-tested: {''.join(well_tested_joyo)}")
 
         excluded_joyo = [j for j in JOYO[level] if j not in kanji_counts]
         if len(excluded_joyo) > 0:
@@ -238,6 +296,37 @@ def print_most_common(cc: CharacterCounts, ctype: str, limit: str = '100'):
         print(f'{i:>5} {c} {count:>5}')
 
 
+def survey(cc: CharacterCounts, ctype: str, limit: str = '100', sample: str = '1'):
+    ctype = CharacterType[ctype.upper()]
+
+    most_common = sorted(
+        cc.ccounts[ctype].items(),
+        key=lambda x: x[1],
+        reverse=True,
+    )
+
+    tested = 0
+    known = 0
+    for i in range(0, min(int(limit), len(most_common)), int(sample)):
+        character = most_common[i][0]
+        print(character, end='')
+
+        if ctype in TRANSCRIPTIONS:
+            input()
+            print(TRANSCRIPTIONS[ctype][character])
+        else:
+            print()
+
+        response = input('Known? (y for yes) ')
+        print()
+
+        tested += 1
+        if response == 'y':
+            known += 1
+
+    print(f"{known}/{tested} known ({round(100*known/tested, 1)}%)")
+
+
 NORMAL_CTYPES = (CharacterType.KANJI, CharacterType.HIRAGANA, CharacterType.KATAKANA, CharacterType.REPETITION)
 
 
@@ -257,11 +346,12 @@ def reload_sentences(_: CharacterCounts):
 
 DISPATCH_TABLE: dict[str, Callable[[CharacterCounts, ...], None]] = {
     'reload': reload_sentences,
-    'joyo_stats': joyo_stats,
+    'joyo': joyo_stats,
     'ctypes': print_ctype_counts,
     'nonstandard': print_nonstandard,
     'export': export_frequencies,
     'common': print_most_common,
+    'survey': survey,
 }
 
 
