@@ -1,19 +1,14 @@
 import argparse
 from dataclasses import dataclass
 from enum import Enum
+from functools import cached_property
 import os
 from typing import Callable
 
 from bs4 import BeautifulSoup as bs
 import requests
 
-from shared import all_exercises
-
-parser = argparse.ArgumentParser()
-parser.add_argument('-w', '--words', action='store_true', help='Use cloze words instead of entire sentences')
-parser.add_argument('-p', '--playing', action='store_true', help='Limit to sentences which I am playing')
-parser.add_argument('command', type=str)
-parser.add_argument('args', type=str, nargs='*')
+from shared import Exercise, all_exercises
 
 
 def load_secondary_joyo():
@@ -223,35 +218,44 @@ def load_joyo(max_level=6) -> set[str]:
             return out
 
 
-@dataclass
-class CharacterCounts:
-    strings: list[str]
-    ccounts: dict[CharacterType, dict[str, int]]
-    ctype_counts: dict[CharacterType, int]
+def parse_readings(pronunciation):
+    pass
 
-    @classmethod
-    def count_strings(cls, strings: list[str]) -> "CharacterCounts":
-        ccounts: dict[CharacterType, dict[str, int]] = {
+
+@dataclass
+class ExerciseList:
+    exercises: list[Exercise]
+    words: bool
+
+    @cached_property
+    def strings(self) -> list[str]:
+        mapf = (lambda e: e.word()) if args.words else (lambda e: e.sentence())
+        return list(map(mapf, self.exercises))
+
+    @cached_property
+    def ccounts(self) -> dict[CharacterType, dict[str, int]]:
+        out: dict[CharacterType, dict[str, int]] = {
             ct: {}
             for ct in CharacterType
         }
-        ctype_counts: dict[CharacterType, int] = {}
 
-        for s in strings:
+        for s in self.strings:
             for c in s:
                 ct = ctype(c)
-                ctype_counts[ct] = ctype_counts.get(ct, 0) + 1
-                ccounts[ct][c] = ccounts[ct].get(c, 0) + 1
+                out[ct][c] = out[ct].get(c, 0) + 1
 
-        return cls(
-            strings=strings,
-            ccounts=ccounts,
-            ctype_counts=ctype_counts,
-        )
+        return out
+
+    @cached_property
+    def ctype_counts(self) -> dict[CharacterType, int]:
+        return {
+            ct: sum(count for count in self.ccounts[ct].values())
+            for ct in CharacterType
+        }
 
 
-def joyo_stats(cc: CharacterCounts):
-    kanji_counts = cc.ccounts[CharacterType.KANJI]
+def joyo_stats(el: ExerciseList):
+    kanji_counts = el.ccounts[CharacterType.KANJI]
     print(f"{len(kanji_counts)} kanji\n")
 
     for level in JOYO.keys():
@@ -270,24 +274,24 @@ def joyo_stats(cc: CharacterCounts):
         print()
 
 
-def print_ctype_counts(cc: CharacterCounts):
-    for t, n in sorted(list(cc.ctype_counts.items()), key=lambda x: x[1]):
+def print_ctype_counts(el: ExerciseList):
+    for t, n in sorted(list(el.ctype_counts.items()), key=lambda x: x[1]):
         print(f"{t.value:<20} {n:>6}")
 
 
-def export_frequencies(cc: CharacterCounts):
+def export_frequencies(el: ExerciseList):
     for ctype in CharacterType:
         dirname = f'frequency/{ctype.value}/jpn-eng'
         os.makedirs(dirname, exist_ok=True)
         for ct in CharacterType:
             with open(os.path.join(dirname, f'{ct.value}.txt'), 'w') as fh:
-                for w, f in sorted(list(cc.ccounts[ct].items()), key=lambda x: x[1], reverse=True):
+                for w, f in sorted(list(el.ccounts[ct].items()), key=lambda x: x[1], reverse=True):
                     fh.write(f"{w}\t{f}\n")
 
 
-def print_most_common(cc: CharacterCounts, ctype: str, limit: str = '100'):
+def print_most_common(el: ExerciseList, ctype: str, limit: str = '100'):
     most_common = sorted(
-        cc.ccounts[CharacterType[ctype.upper()]].items(),
+        el.ccounts[CharacterType[ctype.upper()]].items(),
         key=lambda x: x[1],
     )
 
@@ -296,11 +300,11 @@ def print_most_common(cc: CharacterCounts, ctype: str, limit: str = '100'):
         print(f'{i:>5} {c} {count:>5}')
 
 
-def survey(cc: CharacterCounts, ctype: str, limit: str = '100', sample: str = '1'):
+def survey(el: ExerciseList, ctype: str, limit: str = '100', sample: str = '1'):
     ctype = CharacterType[ctype.upper()]
 
     most_common = sorted(
-        cc.ccounts[ctype].items(),
+        el.ccounts[ctype].items(),
         key=lambda x: x[1],
         reverse=True,
     )
@@ -330,8 +334,8 @@ def survey(cc: CharacterCounts, ctype: str, limit: str = '100', sample: str = '1
 NORMAL_CTYPES = (CharacterType.KANJI, CharacterType.HIRAGANA, CharacterType.KATAKANA, CharacterType.REPETITION)
 
 
-def print_nonstandard(cc: CharacterCounts):
-    for s in cc.strings:
+def print_nonstandard(el: ExerciseList):
+    for s in el.strings:
         nonstandard = [c for c in s if ctype(c) not in NORMAL_CTYPES]
         if nonstandard:
             print(s)
@@ -339,12 +343,12 @@ def print_nonstandard(cc: CharacterCounts):
             print()
 
 
-def reload_sentences(_: CharacterCounts):
+def reload_sentences(_: ExerciseList):
     exercises = all_exercises('jpn-eng', force_reload=True)
     print(f"{len(exercises)} sentences downloaded.")
 
 
-DISPATCH_TABLE: dict[str, Callable[[CharacterCounts, ...], None]] = {
+DISPATCH_TABLE: dict[str, Callable[[ExerciseList, ...], None]] = {
     'reload': reload_sentences,
     'joyo': joyo_stats,
     'ctypes': print_ctype_counts,
@@ -355,25 +359,29 @@ DISPATCH_TABLE: dict[str, Callable[[CharacterCounts, ...], None]] = {
 }
 
 
-if __name__ == "__main__":
-    args = parser.parse_args()
-
+def run_command(command: str, words: bool, playing: bool, args: list[str]):
     exercises = all_exercises("jpn-eng")
-    if args.playing:
+    if playing:
         exercises = [
             e for e in exercises
             if e.numPlayed > 0
         ]
 
-    mapf = (lambda e: e.word()) if args.words else (lambda e: e.sentence())
-    strings = list(map(mapf, exercises))
+    el = ExerciseList(exercises, words)
 
-    cc = CharacterCounts.count_strings(strings)
-
-    if args.command in DISPATCH_TABLE:
-        DISPATCH_TABLE[args.command](cc, *args.args)
+    if command in DISPATCH_TABLE:
+        DISPATCH_TABLE[command](el, *args)
     else:
-        raise ValueError(f"Invalid command: {args.command} (valid commands: {', '.join(DISPATCH_TABLE.keys())})")
+        raise ValueError(f"Invalid command: {command} (valid commands: {', '.join(DISPATCH_TABLE.keys())})")
 
 
+parser = argparse.ArgumentParser()
+parser.add_argument('-w', '--words', action='store_true', help='Use cloze words instead of entire sentences')
+parser.add_argument('-p', '--playing', action='store_true', help='Limit to sentences which I am playing')
+parser.add_argument('command', type=str, choices=list(DISPATCH_TABLE.keys()))
+parser.add_argument('args', type=str, nargs='*')
 
+
+if __name__ == "__main__":
+    args = parser.parse_args()
+    run_command(command=args.command, words=args.words, playing=args.playing, args=args.args)
