@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from enum import Enum
 from functools import cached_property
 import os
-from typing import Callable
+from typing import Callable, Iterable
 
 from bs4 import BeautifulSoup as bs
 import requests
@@ -218,8 +218,22 @@ def load_joyo(max_level=6) -> set[str]:
             return out
 
 
-def parse_readings(pronunciation):
-    pass
+def parse_readings(e: Exercise) -> Iterable[tuple[str, str]]:
+    for i in range(len(e.pronunciation)):
+        if e.pronunciation[i] == '【':
+            kanji = ''
+            for j in range(i-1, -1, -1):
+                if ctype(e.pronunciation[j]) is not CharacterType.KANJI:
+                    break
+                kanji = e.pronunciation[j] + kanji
+
+            kana = ''
+            for c in e.pronunciation[i+1:]:
+                if c == '】':
+                    break
+                kana += c
+
+            yield kanji, kana
 
 
 @dataclass
@@ -252,6 +266,19 @@ class ExerciseList:
             ct: sum(count for count in self.ccounts[ct].values())
             for ct in CharacterType
         }
+
+    @cached_property
+    def readings(self) -> dict[tuple[str, str], int]:
+        if self.words:
+            raise ValueError("Readings not supported for words yet.")
+
+        out: dict[tuple[str, str], int] = {}
+
+        for e in self.exercises:
+            for pair in parse_readings(e):
+                out[pair] = out.get(pair, 0) + 1
+
+        return out
 
 
 def joyo_stats(el: ExerciseList):
@@ -343,6 +370,19 @@ def print_nonstandard(el: ExerciseList):
             print()
 
 
+def common_readings(el: ExerciseList, limit: str = '100'):
+    readings = sorted(el.readings.items(), key=lambda x: x[1])
+    limit = min(int(limit), len(readings))
+
+    for i, ((kanji, kana), count) in enumerate(readings[-limit:]):
+        print(f"{limit - i:>4} {kanji:＿<4} {kana:＿<6} {count:>4}")
+
+    print(f"{len(readings)} total readings")
+
+    well_tested_readings = [(r, count) for r, count in readings if count >= WELL_TESTING_THRESHOLD]
+    print(f"{len(well_tested_readings)} well-tested readings")
+
+
 def reload_sentences(_: ExerciseList):
     exercises = all_exercises('jpn-eng', force_reload=True)
     print(f"{len(exercises)} sentences downloaded.")
@@ -355,6 +395,7 @@ DISPATCH_TABLE: dict[str, Callable[[ExerciseList, ...], None]] = {
     'nonstandard': print_nonstandard,
     'export': export_frequencies,
     'common': print_most_common,
+    'common_readings': common_readings,
     'survey': survey,
 }
 
