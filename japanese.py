@@ -326,6 +326,11 @@ def print_most_common(el: ExerciseList, ctype: str, limit: str = '100'):
         c, count = most_common[-i]
         print(f'{i:>5} {c} {count:>5}')
 
+    print(f"{len(most_common)} total items")
+
+    well_tested = [(x, count) for x, count in most_common if count >= WELL_TESTING_THRESHOLD]
+    print(f"{len(well_tested)} well tested")
+
 
 def survey(el: ExerciseList, ctype: str, limit: str = '100', sample: str = '1'):
     ctype = CharacterType[ctype.upper()]
