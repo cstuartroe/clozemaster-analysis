@@ -121,6 +121,8 @@ HIRAGANA_TABLE = {
     'd': 'だぢづでど',
     'b': 'ばびぶべぼ',
     'p': 'ぱぴぷぺぽ',
+    '-': 'ぁ  ぇ ',
+    '-y': 'ゃ ゅ ょ',
 }
 
 KATAKANA_TABLE = {
@@ -139,6 +141,9 @@ KATAKANA_TABLE = {
     'd': 'ダヂヅデド',
     'b': 'バビブベボ',
     'p': 'パピプペポ',
+    '-': 'ァィゥェォ',
+    '-y': 'ャ ュ ョ',
+    'v': '  ヴ  '
 }
 
 VOWELS = 'aiueo'
@@ -172,11 +177,6 @@ HIRAGANA_TRANSCRIPTIONS: dict[str, str] = {
     **kana_table(HIRAGANA_TABLE),
     'ん': 'N',
     'っ': 'Q',
-    'ゃ': '-ya',
-    'ゅ': '-yu',
-    'ょ': '-yo',
-    'ぁ': '-a',
-    'ぇ': '-e',
 }
 
 
@@ -184,11 +184,7 @@ KATAKANA_TRANSCRIPTIONS: dict[str, str] = {
     **kana_table(KATAKANA_TABLE),
     'ン': 'N',
     'ッ': 'Q',
-    'ャ': '-ya',
-    'ュ': '-yu',
-    'ョ': '-yo',
     'ー': 'chōonpu',
-    '・': 'space',
 }
 
 
@@ -199,15 +195,15 @@ class CharacterType(Enum):
     KATAKANA = "katakana"
     KANJI = "kanji"
     FULLWIDTH = "fullwidth ASCII"
-    REPETITION = "repetition mark"
+    SPECIAL = "special"
     OTHER = "other"
 
 
 def ctype(c: str) -> CharacterType:
     o = ord(c)
 
-    if c == "々":
-        return CharacterType.REPETITION
+    if c in "々ヶヵ・":
+        return CharacterType.SPECIAL
 
     if 0x3000 <= o <= 0x303F:
         return CharacterType.JPUNCT
@@ -367,19 +363,13 @@ def print_most_common(el: ExerciseList, ctype: str, limit: str = '100'):
     print(f"{len(well_tested)} well tested")
 
 
-def survey(el: ExerciseList, ctype: str, limit: str = '100', sample: str = '1'):
-    ctype = CharacterType[ctype.upper()]
-
-    most_common = sorted(
-        el.ccounts[ctype].items(),
-        key=lambda x: x[1],
-        reverse=True,
-    )
-
+def run_survey(ctype: CharacterType, chars: list[str], sample: int = 1):
     tested = 0
     known = 0
-    for i in range(0, min(int(limit), len(most_common)), int(sample)):
-        character = most_common[i][0]
+    wrong: list[str] = []
+
+    for i in range(0, len(chars), sample or 1):
+        character = chars[i]
         print(character, end='')
 
         if ctype in TRANSCRIPTIONS:
@@ -394,11 +384,31 @@ def survey(el: ExerciseList, ctype: str, limit: str = '100', sample: str = '1'):
         tested += 1
         if response == 'y':
             known += 1
+        else:
+            wrong.append(character)
 
-    print(f"{known}/{tested} known ({round(100*known/tested, 1)}%)")
+    print(f"{known}/{tested} known ({round(100 * known / tested, 1)}%)")
+
+    if sample == 0 and len(wrong) > 0:
+        print()
+        run_survey(ctype, wrong, 0)
 
 
-NORMAL_CTYPES = (CharacterType.KANJI, CharacterType.HIRAGANA, CharacterType.KATAKANA, CharacterType.REPETITION)
+def survey(el: ExerciseList, ctype: str, limit: str = '100', sample: str = '1'):
+    ctype = CharacterType[ctype.upper()]
+
+    most_common = [
+        c for c, count in sorted(
+            el.ccounts[ctype].items(),
+            key=lambda x: x[1],
+            reverse=True,
+        )
+    ]
+
+    run_survey(ctype, most_common[:int(limit)], int(sample))
+
+
+NORMAL_CTYPES = (CharacterType.KANJI, CharacterType.HIRAGANA, CharacterType.KATAKANA, CharacterType.SPECIAL)
 
 
 def print_nonstandard(el: ExerciseList):
