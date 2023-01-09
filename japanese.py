@@ -123,6 +123,24 @@ HIRAGANA_TABLE = {
     'p': 'ぱぴぷぺぽ',
 }
 
+KATAKANA_TABLE = {
+    '': 'アイウエオ',
+    'k': 'カキクケコ',
+    's': 'サシスセソ',
+    't': 'タチツテト',
+    'n': 'ナニヌネノ',
+    'h': 'ハヒフヘホ',
+    'm': 'マミムメモ',
+    'y': 'ヤ ユ ヨ',
+    'r': 'ラリルレロ',
+    'w': 'ワヰ ヱヲ',
+    'g': 'ガギグゲゴ',
+    'z': 'ザジズゼゾ',
+    'd': 'ダヂヅデド',
+    'b': 'バビブベボ',
+    'p': 'パピプペポ',
+}
+
 VOWELS = 'aiueo'
 
 
@@ -141,13 +159,17 @@ def transcription(s: str) -> str:
     return TRANSCRIPTION_REPLACEMENTS.get(s, s)
 
 
-HIRAGANA_TRANSCRIPTIONS: dict[str, str] = {
-    **{
+def kana_table(table) -> dict[str, str]:
+    return {
         kana: transcription(c + VOWELS[i])
-        for c, kanas in HIRAGANA_TABLE.items()
+        for c, kanas in table.items()
         for i, kana in enumerate(kanas)
         if kana != ' '
-    },
+    }
+
+
+HIRAGANA_TRANSCRIPTIONS: dict[str, str] = {
+    **kana_table(HIRAGANA_TABLE),
     'ん': 'N',
     'っ': 'Q',
     'ゃ': '-ya',
@@ -155,6 +177,18 @@ HIRAGANA_TRANSCRIPTIONS: dict[str, str] = {
     'ょ': '-yo',
     'ぁ': '-a',
     'ぇ': '-e',
+}
+
+
+KATAKANA_TRANSCRIPTIONS: dict[str, str] = {
+    **kana_table(KATAKANA_TABLE),
+    'ン': 'N',
+    'ッ': 'Q',
+    'ャ': '-ya',
+    'ュ': '-yu',
+    'ョ': '-yo',
+    'ー': 'chōonpu',
+    '・': 'space',
 }
 
 
@@ -198,6 +232,7 @@ def ctype(c: str) -> CharacterType:
 
 TRANSCRIPTIONS: dict[CharacterType, dict[str, str]] = {
     CharacterType.HIRAGANA: HIRAGANA_TRANSCRIPTIONS,
+    CharacterType.KATAKANA: KATAKANA_TRANSCRIPTIONS,
 }
 
 
