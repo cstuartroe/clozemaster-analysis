@@ -433,6 +433,14 @@ def common_readings(el: ExerciseList, limit: str = '100'):
     print(f"{len(well_tested_readings)} well-tested readings")
 
 
+def containing(el: ExerciseList, substring: str, limit: str = '100'):
+    for e, s in zip(el.exercises, el.strings):
+        if substring in s:
+            print(e.text)
+            print(e.translation)
+            print()
+
+
 def reload_sentences(_: ExerciseList):
     exercises = all_exercises('jpn-eng', force_reload=True)
     print(f"{len(exercises)} sentences downloaded.")
@@ -447,6 +455,7 @@ DISPATCH_TABLE: dict[str, Callable[[ExerciseList, ...], None]] = {
     'common': print_most_common,
     'common_readings': common_readings,
     'survey': survey,
+    'contain': containing,
 }
 
 
