@@ -253,16 +253,28 @@ def parse_readings(e: Exercise) -> Iterable[tuple[str, str]]:
     for i in range(len(e.pronunciation)):
         if e.pronunciation[i] == '【':
             kanji = ''
-            for j in range(i-1, -1, -1):
-                if ctype(e.pronunciation[j]) is not CharacterType.KANJI:
+            j = i-1
+            while j >= 0:
+                if e.pronunciation[j] == '々':
+                    kanji = e.pronunciation[j-1] + kanji
+                    j -= 1
+
+                elif ctype(e.pronunciation[j]) is not CharacterType.KANJI:
                     break
+
                 kanji = e.pronunciation[j] + kanji
+                j -= 1
 
             kana = ''
             for c in e.pronunciation[i+1:]:
                 if c == '】':
                     break
                 kana += c
+
+            # if not all(ctype(c) is CharacterType.KANJI for c in kanji):
+            #     print(f"Warning: not all kanji: {kanji}")
+            # if not all(ctype(c) is CharacterType.HIRAGANA for c in kana):
+            #     print(f"Warning: not all hiragana: {kana}")
 
             yield kanji, kana
 
@@ -312,6 +324,68 @@ class ExerciseList:
         return out
 
 
+Readings = dict[str, dict[str, int]]
+
+
+def add_reading(readings: Readings, kanji: str, reading: str, count: int):
+    if kanji not in readings:
+        readings[kanji] = {}
+
+    if reading in readings[kanji]:
+        raise ValueError(f"Reading already present: {kanji} {reading}")
+
+    readings[kanji][reading] = count
+
+
+def is_regular_reading(kanji: str, multi_kanji_reading: str, one_kanji_readings: Readings):
+    if (kanji == "") is not (multi_kanji_reading == ""):
+        print(f"Empty mismatch: {repr(kanji)} {repr(multi_kanji_reading)}")
+        return False
+
+    if kanji == "":
+        return True
+
+    for logogram in kanji:
+        for one_kanji_reading in one_kanji_readings.get(logogram, {}).keys():
+            if multi_kanji_reading.startswith(one_kanji_reading):
+                if is_regular_reading(kanji[1:], multi_kanji_reading[len(one_kanji_reading):], one_kanji_readings):
+                    return True
+
+            if len(one_kanji_reading) > 1 and one_kanji_reading[-1] in "つちくき":
+                with_sokuon = one_kanji_reading[:-1] + 'っ'
+                if with_sokuon not in one_kanji_readings[logogram] and multi_kanji_reading.startswith(with_sokuon):
+                    if is_regular_reading(kanji[1:], multi_kanji_reading[len(with_sokuon):], one_kanji_readings):
+                        one_kanji_readings[logogram][with_sokuon] = 0
+                        return True
+
+    return False
+
+
+@dataclass
+class ReadingsAnalysis:
+    el: ExerciseList
+
+    def __post_init__(self):
+        self.one_kanji_readings: Readings = {}
+        multi_kanji_readings: Readings = {}
+
+        for (kanji, reading), count in self.el.readings.items():
+            if len(kanji) == 1:
+                add_reading(self.one_kanji_readings, kanji, reading, count)
+            else:
+                add_reading(multi_kanji_readings, kanji, reading, count)
+
+        self.regular_multi_kanji_readings: Readings = {}
+        self.irregular_multi_kanji_readings: Readings = {}
+
+        for kanji, readings in multi_kanji_readings.items():
+            for reading, count in readings.items():
+                if is_regular_reading(kanji, reading, self.one_kanji_readings):
+                    add_reading(self.regular_multi_kanji_readings, kanji, reading, count)
+                else:
+                    add_reading(self.irregular_multi_kanji_readings, kanji, reading, count)
+
+
 def joyo_stats(el: ExerciseList):
     kanji_counts = el.ccounts[CharacterType.KANJI]
     print(f"{len(kanji_counts)} kanji\n")
@@ -338,13 +412,12 @@ def print_ctype_counts(el: ExerciseList):
 
 
 def export_frequencies(el: ExerciseList):
-    for ctype in CharacterType:
-        dirname = f'frequency/{ctype.value}/jpn-eng'
-        os.makedirs(dirname, exist_ok=True)
-        for ct in CharacterType:
-            with open(os.path.join(dirname, f'{ct.value}.txt'), 'w') as fh:
-                for w, f in sorted(list(el.ccounts[ct].items()), key=lambda x: x[1], reverse=True):
-                    fh.write(f"{w}\t{f}\n")
+    dirname = f'frequency/jpn-eng'
+    os.makedirs(dirname, exist_ok=True)
+    for ct in CharacterType:
+        with open(os.path.join(dirname, f'{ct.value}.txt'), 'w') as fh:
+            for w, f in sorted(list(el.ccounts[ct].items()), key=lambda x: x[1], reverse=True):
+                fh.write(f"{w}\t{f}\n")
 
 
 def print_most_common(el: ExerciseList, ctype: str, limit: str = '100'):
@@ -433,6 +506,30 @@ def common_readings(el: ExerciseList, limit: str = '100'):
     print(f"{len(well_tested_readings)} well-tested readings")
 
 
+def reading_analysis(el: ExerciseList, limit: str = '100'):
+    analysis = ReadingsAnalysis(el)
+    limit = int(limit)
+
+    for name, multi_kanji_readings in (("Regular", analysis.regular_multi_kanji_readings),
+                                       ("Irregular", analysis.irregular_multi_kanji_readings)):
+        print(f"{name} readings:\n")
+
+        multi_kanji_readings = [
+            (kanji, reading, count)
+            for kanji, readings in multi_kanji_readings.items()
+            for reading, count in readings.items()
+        ]
+        multi_kanji_readings.sort(key=lambda x: x[2])
+        list_limit = min(limit, len(multi_kanji_readings))
+
+        for i, (kanji, reading, count) in enumerate(multi_kanji_readings[-list_limit:]):
+            print(f"{list_limit-i:>4} {kanji:＿<4} {reading:＿<6} {count:>4}")
+            for logogram in kanji:
+                print(f"     - {logogram} {'/'.join(analysis.one_kanji_readings.get(logogram, {}).keys())}")
+
+        print(f"\n{len(multi_kanji_readings)} {name.lower()} readings.\n")
+
+
 def containing(el: ExerciseList, substring: str, limit: str = '100'):
     for e, s in zip(el.exercises, el.strings):
         if substring in s:
@@ -454,6 +551,7 @@ DISPATCH_TABLE: dict[str, Callable[[ExerciseList, ...], None]] = {
     'export': export_frequencies,
     'common': print_most_common,
     'common_readings': common_readings,
+    'reading_analysis': reading_analysis,
     'survey': survey,
     'contain': containing,
 }
