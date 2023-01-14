@@ -249,34 +249,47 @@ def load_joyo(max_level=6) -> set[str]:
             return out
 
 
-def parse_readings(e: Exercise) -> Iterable[tuple[str, str]]:
-    for i in range(len(e.pronunciation)):
-        if e.pronunciation[i] == '【':
-            kanji = ''
-            j = i-1
-            while j >= 0:
-                if e.pronunciation[j] == '々':
-                    kanji = e.pronunciation[j-1] + kanji
-                    j -= 1
+class ReadingsParser:
+    def __init__(self, e: Exercise):
+        self.pronunciation = e.pronunciation
+        self.i = None
 
-                elif ctype(e.pronunciation[j]) is not CharacterType.KANJI:
-                    break
+    def next(self):
+        if self.i < len(self.pronunciation):
+            return self.pronunciation[self.i]
+        return None
 
-                kanji = e.pronunciation[j] + kanji
-                j -= 1
+    def parse(self) -> Iterable[tuple[str, str]]:
+        self.i = 0
+        while self.i < len(self.pronunciation):
+            if ctype(self.next()) is CharacterType.KANJI:
+                yield self.grab_reading()
+            else:
+                self.i += 1
 
-            kana = ''
-            for c in e.pronunciation[i+1:]:
-                if c == '】':
-                    break
-                kana += c
+    def grab_reading(self):
+        assert ctype(self.next()) is CharacterType.KANJI
 
-            # if not all(ctype(c) is CharacterType.KANJI for c in kanji):
-            #     print(f"Warning: not all kanji: {kanji}")
-            # if not all(ctype(c) is CharacterType.HIRAGANA for c in kana):
-            #     print(f"Warning: not all hiragana: {kana}")
+        kanji, kana = '', ''
 
-            yield kanji, kana
+        while ctype(self.next()) is CharacterType.KANJI or self.next() == '々':
+            kanji += self.next()
+            self.i += 1
+
+        if self.next() != '【':
+            # print(f"Warning: kanji {kanji} does not have reading: {self.pronunciation}")
+            return kanji, None
+        self.i += 1
+
+        while self.next() != '】':
+            kana += self.next()
+            self.i += 1
+        self.i += 1
+
+        # if not all(ctype(c) is CharacterType.HIRAGANA for c in kana):
+        #     print(f"Warning: not all hiragana: {kana}")
+
+        return kanji, kana
 
 
 @dataclass
@@ -318,8 +331,22 @@ class ExerciseList:
         out: dict[tuple[str, str], int] = {}
 
         for e in self.exercises:
-            for pair in parse_readings(e):
+            for pair in ReadingsParser(e).parse():
                 out[pair] = out.get(pair, 0) + 1
+
+        return out
+
+    @cached_property
+    def readings_by_character(self) -> dict[str, list[tuple[str, str, int]]]:
+        out: dict[str, list[tuple[str, str, int]]] = {}
+
+        for (kanji, kana), count in self.readings.items():
+            for c in kanji:
+                out[c] = out.get(c, [])
+                out[c].append((kanji, kana, count))
+
+        for l in out.values():
+            l.sort(key=lambda x: x[2])
 
         return out
 
@@ -421,19 +448,31 @@ def export_frequencies(el: ExerciseList):
 
 
 def print_most_common(el: ExerciseList, ctype: str, limit: str = '100'):
+    ctype = CharacterType[ctype.upper()]
+
     most_common = sorted(
-        el.ccounts[CharacterType[ctype.upper()]].items(),
+        el.ccounts[ctype].items(),
         key=lambda x: x[1],
     )
 
     for i in range(min(int(limit), len(most_common)), 0, -1):
         c, count = most_common[-i]
-        print(f'{i:>5} {c} {count:>5}')
+        if count < WELL_TESTING_THRESHOLD:
+            continue
 
-    print(f"{len(most_common)} total items")
+        print(f'{i:>5} {c} {count:>26}')
+        if ctype is CharacterType.KANJI:
+            print()
+            for kanji, kana, count in el.readings_by_character[c][::-1]:
+                if count < WELL_TESTING_THRESHOLD:
+                    continue
+                print(f"      - {kanji:＿<4} {str(kana):＿<6} {count:>5}")
+            print('-----------')
+
+    print(f"{len(most_common)} total {ctype.value}")
 
     well_tested = [(x, count) for x, count in most_common if count >= WELL_TESTING_THRESHOLD]
-    print(f"{len(well_tested)} well tested")
+    print(f"{len(well_tested)} well tested {ctype.value}")
 
 
 def run_survey(ctype: CharacterType, chars: list[str], sample: int = 1):
@@ -498,7 +537,7 @@ def common_readings(el: ExerciseList, limit: str = '100'):
     limit = min(int(limit), len(readings))
 
     for i, ((kanji, kana), count) in enumerate(readings[-limit:]):
-        print(f"{limit - i:>4} {kanji:＿<4} {kana:＿<6} {count:>4}")
+        print(f"{limit - i:>4} {kanji:＿<4} {str(kana):＿<6} {count:>4}")
 
     print(f"{len(readings)} total readings")
 
@@ -534,6 +573,7 @@ def containing(el: ExerciseList, substring: str, limit: str = '100'):
     for e, s in zip(el.exercises, el.strings):
         if substring in s:
             print(e.text)
+            print(e.pronunciation)
             print(e.translation)
             print()
 
@@ -576,6 +616,7 @@ def run_command(command: str, words: bool, playing: bool, args: list[str]):
 parser = argparse.ArgumentParser()
 parser.add_argument('-w', '--words', action='store_true', help='Use cloze words instead of entire sentences')
 parser.add_argument('-p', '--playing', action='store_true', help='Limit to sentences which I am playing')
+parser.add_argument('-W', '--well_tested', action='store_true', help='Limit to well-tested entries')
 parser.add_argument('command', type=str, choices=list(DISPATCH_TABLE.keys()))
 parser.add_argument('args', type=str, nargs='*')
 
