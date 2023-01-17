@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from enum import Enum
 from functools import cached_property
 import os
-from typing import Callable, Iterable
+from typing import Callable, Iterable, Optional
 
 from bs4 import BeautifulSoup as bs
 import requests
@@ -457,17 +457,7 @@ def print_most_common(el: ExerciseList, ctype: str, limit: str = '100'):
 
     for i in range(min(int(limit), len(most_common)), 0, -1):
         c, count = most_common[-i]
-        if count < WELL_TESTING_THRESHOLD:
-            continue
-
         print(f'{i:>5} {c} {count:>26}')
-        if ctype is CharacterType.KANJI:
-            print()
-            for kanji, kana, count in el.readings_by_character[c][::-1]:
-                if count < WELL_TESTING_THRESHOLD:
-                    continue
-                print(f"      - {kanji:＿<4} {str(kana):＿<6} {count:>5}")
-            print('-----------')
 
     print(f"{len(most_common)} total {ctype.value}")
 
@@ -533,16 +523,21 @@ def print_nonstandard(el: ExerciseList):
 
 
 def common_readings(el: ExerciseList, limit: str = '100'):
-    readings = sorted(el.readings.items(), key=lambda x: x[1])
+    readings = sorted(el.readings.items(), key=lambda x: len(x[1]))
     limit = min(int(limit), len(readings))
 
-    for i, ((kanji, kana), count) in enumerate(readings[-limit:]):
-        print(f"{limit - i:>4} {kanji:＿<4} {str(kana):＿<6} {count:>4}")
+    for i, ((kanji, kana), exercises) in enumerate(readings[-limit:]):
+        print(f"{limit - i:>4} {kanji:＿<4} {str(kana):＿<6} {len(exercises):>4}")
 
-    print(f"{len(readings)} total readings")
+    print(f"{len(readings)} total readings ({len(readings)/len(el.exercises):.2f} per exercise)")
 
-    well_tested_readings = [(r, count) for r, count in readings if count >= WELL_TESTING_THRESHOLD]
-    print(f"{len(well_tested_readings)} well-tested readings")
+    well_tested_readings = [
+        (r, len(exercises))
+        for r, exercises in readings
+        if len(exercises) >= WELL_TESTING_THRESHOLD
+    ]
+    print(f"{len(well_tested_readings)} well-tested readings "
+          f"({len(well_tested_readings)/len(el.exercises):.2f} per exercise)")
 
 
 def reading_analysis(el: ExerciseList, limit: str = '100'):
@@ -660,13 +655,15 @@ DISPATCH_TABLE: dict[str, Callable[[ExerciseList, ...], None]] = {
 }
 
 
-def run_command(command: str, words: bool, playing: bool, args: list[str]):
+def run_command(command: str, words: bool, playing: bool, num_sentences: Optional[int], args: list[str]):
     exercises = all_exercises("jpn-eng")
     if playing:
         exercises = [
             e for e in exercises
             if e.numPlayed > 0
         ]
+    elif num_sentences:
+        exercises = exercises[:num_sentences]
 
     el = ExerciseList(exercises, words)
 
@@ -679,11 +676,12 @@ def run_command(command: str, words: bool, playing: bool, args: list[str]):
 parser = argparse.ArgumentParser()
 parser.add_argument('-w', '--words', action='store_true', help='Use cloze words instead of entire sentences')
 parser.add_argument('-p', '--playing', action='store_true', help='Limit to sentences which I am playing')
-parser.add_argument('-W', '--well_tested', action='store_true', help='Limit to well-tested entries')
+parser.add_argument('-n', '--num_sentences', type=int, default=None, required=False, help='Number of sentences')
 parser.add_argument('command', type=str, choices=list(DISPATCH_TABLE.keys()))
 parser.add_argument('args', type=str, nargs='*')
 
 
 if __name__ == "__main__":
     args = parser.parse_args()
-    run_command(command=args.command, words=args.words, playing=args.playing, args=args.args)
+    run_command(command=args.command, words=args.words, playing=args.playing, num_sentences=args.num_sentences,
+                args=args.args)
