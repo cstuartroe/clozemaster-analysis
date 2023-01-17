@@ -324,29 +324,29 @@ class ExerciseList:
         }
 
     @cached_property
-    def readings(self) -> dict[tuple[str, str], int]:
+    def readings(self) -> dict[tuple[str, str], list[Exercise]]:
         if self.words:
             raise ValueError("Readings not supported for words yet.")
 
-        out: dict[tuple[str, str], int] = {}
+        out: dict[tuple[str, str], list[Exercise]] = {}
 
         for e in self.exercises:
             for pair in ReadingsParser(e).parse():
-                out[pair] = out.get(pair, 0) + 1
+                out[pair] = out.get(pair, []) + [e]
 
         return out
 
     @cached_property
-    def readings_by_character(self) -> dict[str, list[tuple[str, str, int]]]:
-        out: dict[str, list[tuple[str, str, int]]] = {}
+    def readings_by_character(self) -> dict[str, list[tuple[str, str, list[Exercise]]]]:
+        out: dict[str, list[tuple[str, str, list[Exercise]]]] = {}
 
-        for (kanji, kana), count in self.readings.items():
+        for (kanji, kana), exercises in self.readings.items():
             for c in kanji:
                 out[c] = out.get(c, [])
-                out[c].append((kanji, kana, count))
+                out[c].append((kanji, kana, exercises))
 
         for l in out.values():
-            l.sort(key=lambda x: x[2])
+            l.sort(key=lambda x: len(x[2]))
 
         return out
 
@@ -396,11 +396,11 @@ class ReadingsAnalysis:
         self.one_kanji_readings: Readings = {}
         multi_kanji_readings: Readings = {}
 
-        for (kanji, reading), count in self.el.readings.items():
+        for (kanji, reading), exercises in self.el.readings.items():
             if len(kanji) == 1:
-                add_reading(self.one_kanji_readings, kanji, reading, count)
+                add_reading(self.one_kanji_readings, kanji, reading, len(exercises))
             else:
-                add_reading(multi_kanji_readings, kanji, reading, count)
+                add_reading(multi_kanji_readings, kanji, reading, len(exercises))
 
         self.regular_multi_kanji_readings: Readings = {}
         self.irregular_multi_kanji_readings: Readings = {}
@@ -578,6 +578,68 @@ def containing(el: ExerciseList, substring: str, limit: str = '100'):
             print()
 
 
+LATEX_TEMPLATE = r"""
+\documentclass{article}
+\usepackage{CJKutf8}
+
+\title{Most common Kanji in Clozemaster}
+\date{}
+
+\setlength\parindent{24pt}
+
+\begin{document}
+
+\maketitle
+
+%s
+
+\end{document}
+"""
+
+
+CJK_FONT = "min"
+
+
+def latex(el: ExerciseList):
+    most_common_kanji = sorted(
+        el.ccounts[CharacterType.KANJI].items(),
+        key=lambda x: x[1],
+        reverse=True,
+    )
+
+    content = ""
+
+    for character, count in most_common_kanji:
+        content += (
+            f"\\begin{{CJK}}{{UTF8}}{{{CJK_FONT}}}"
+            f"\\section{{{character}}}"
+            "\\end{CJK}\n\n"
+            f"{count} occurrences\n\n"
+            "\\bigskip\n\n"
+        )
+
+        for kanji, kana, exercises in el.readings_by_character[character][::-1]:
+            content += (
+                f"\\noindent \\begin{{CJK}}{{UTF8}}{{{CJK_FONT}}}"
+                f"{kanji}　【{kana}】"
+                "\\end{CJK}\n"
+                f"{len(exercises)} occurrence{'s' if len(exercises) > 1 else ''}\n\n"
+                "\\bigskip\n\n"
+            )
+
+            exercise = exercises[0]
+
+            content += (
+                f"\\begin{{CJK}}{{UTF8}}{{{CJK_FONT}}}"
+                f"{exercise.pronunciation}"
+                "\\end{CJK}\n\n"
+                f"{exercise.translation}\n\n"
+                "\\bigskip\n\n"
+            )
+
+    print(LATEX_TEMPLATE % content)
+
+
 def reload_sentences(_: ExerciseList):
     exercises = all_exercises('jpn-eng', force_reload=True)
     print(f"{len(exercises)} sentences downloaded.")
@@ -593,6 +655,7 @@ DISPATCH_TABLE: dict[str, Callable[[ExerciseList, ...], None]] = {
     'common_readings': common_readings,
     'reading_analysis': reading_analysis,
     'survey': survey,
+    'latex': latex,
     'contain': containing,
 }
 
