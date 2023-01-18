@@ -672,6 +672,15 @@ def latex(el: ExerciseList):
     print(LATEX_TEMPLATE % content)
 
 
+def played_pattern(el: ExerciseList):
+    for i, e in enumerate(el.exercises):
+        print('_' if e.numPlayed == 0 else '#', end='')
+        if i % 60 == 59:
+            print()
+
+    print()
+
+
 def reload_sentences(_: ExerciseList):
     exercises = all_exercises('jpn-eng', force_reload=True)
     print(f"{len(exercises)} sentences downloaded.")
@@ -690,6 +699,7 @@ DISPATCH_TABLE: dict[str, Callable[[ExerciseList, ...], None]] = {
     'survey': survey,
     'latex': latex,
     'contain': containing,
+    'played': played_pattern,
 }
 
 
