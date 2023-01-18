@@ -3,12 +3,13 @@ from dataclasses import dataclass
 from enum import Enum
 from functools import cached_property
 import os
+from tqdm import tqdm
 from typing import Callable, Iterable, Optional
 
 from bs4 import BeautifulSoup as bs
 import requests
 
-from shared import Exercise, all_exercises
+from shared import Exercise, all_exercises, TokenManager
 
 
 def load_secondary_joyo():
@@ -350,6 +351,21 @@ class ExerciseList:
 
         return out
 
+    @cached_property
+    def lemmas(self) -> dict[str, list[Exercise]]:
+        out: dict[str, list[Exercise]] = {}
+
+        for e in tqdm(self.exercises):
+            for t in e.tokens():
+                out[t.lemma] = out.get(t.lemma, [])
+                out[t.lemma].append(e)
+
+        TokenManager.write()
+
+        del out[None]
+
+        return out
+
 
 Readings = dict[str, dict[str, int]]
 
@@ -532,12 +548,32 @@ def common_readings(el: ExerciseList, limit: str = '100'):
     print(f"{len(readings)} total readings ({len(readings)/len(el.exercises):.2f} per exercise)")
 
     well_tested_readings = [
-        (r, len(exercises))
+        (r, exercises)
         for r, exercises in readings
         if len(exercises) >= WELL_TESTING_THRESHOLD
     ]
     print(f"{len(well_tested_readings)} well-tested readings "
           f"({len(well_tested_readings)/len(el.exercises):.2f} per exercise)")
+
+
+def common_lemmas(el: ExerciseList, limit: str = 100):
+    lemmas = sorted(el.lemmas.items(), key=lambda x: len(x[1]))
+
+    limit = min(int(limit), len(lemmas))
+
+    for i, (lemma, exercises) in enumerate(lemmas[-limit:]):
+        print(f'{limit - i:>6} {lemma:＿<4} {len(exercises):>6}')
+
+    print(f"{len(lemmas)} total lemmas ({len(lemmas)/len(el.exercises):.2f} per exercise)")
+
+    well_tested_lemmas = [
+        (l, exercises)
+        for l, exercises in lemmas
+        if len(exercises) >= WELL_TESTING_THRESHOLD
+    ]
+
+    print(f"{len(well_tested_lemmas)} well-tested lemmas "
+          f"({len(well_tested_lemmas) / len(el.exercises):.2f} per exercise)")
 
 
 def reading_analysis(el: ExerciseList, limit: str = '100'):
@@ -569,6 +605,7 @@ def containing(el: ExerciseList, substring: str, limit: str = '100'):
         if substring in s:
             print(e.text)
             print(e.pronunciation)
+            print(e.tokens())
             print(e.translation)
             print()
 
@@ -647,7 +684,8 @@ DISPATCH_TABLE: dict[str, Callable[[ExerciseList, ...], None]] = {
     'nonstandard': print_nonstandard,
     'export': export_frequencies,
     'common': print_most_common,
-    'common_readings': common_readings,
+    'readings': common_readings,
+    'lemmas': common_lemmas,
     'reading_analysis': reading_analysis,
     'survey': survey,
     'latex': latex,
