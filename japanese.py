@@ -681,6 +681,36 @@ def played_pattern(el: ExerciseList):
     print()
 
 
+def to_play_histogram(el: ExerciseList):
+    current_counts = {}
+    for e in el.exercises:
+        if e.numPlayed == 0:
+            continue
+        for t in e.tokens():
+            current_counts[t.lemma] = current_counts.get(t.lemma, 0) + 1
+    del current_counts[None]
+
+    total_counts = {}
+    for e in el.exercises:
+        for t in e.tokens():
+            total_counts[t.lemma] = total_counts.get(t.lemma, 0) + 1
+    del total_counts[None]
+
+    played_total_counts = sorted(
+        [(l, total_counts[l]) for l in current_counts.keys()],
+        key=lambda x: x[1],
+    )
+
+    cap = 100
+    for lemma, count in played_total_counts:
+        print(f"{lemma:＿<6} {'#'*min(count, cap)}{str(count) if count > cap else ''}")
+
+    print(f"{len([l for l, c in current_counts.items() if c >= WELL_TESTING_THRESHOLD])}"
+          f"/{len(current_counts)} currently well-tested")
+    print(f"{len([l for l in current_counts.keys() if total_counts[l] >= WELL_TESTING_THRESHOLD])}"
+          f"/{len(current_counts)} eventually well-tested")
+
+
 def reload_sentences(_: ExerciseList):
     exercises = all_exercises('jpn-eng', force_reload=True)
     print(f"{len(exercises)} sentences downloaded.")
@@ -700,6 +730,7 @@ DISPATCH_TABLE: dict[str, Callable[[ExerciseList, ...], None]] = {
     'latex': latex,
     'contain': containing,
     'played': played_pattern,
+    'to_play': to_play_histogram,
 }
 
 
