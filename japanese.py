@@ -434,17 +434,24 @@ def joyo_stats(el: ExerciseList):
     print(f"{len(kanji_counts)} kanji\n")
 
     for level in JOYO.keys():
-        joyo = load_joyo(level)
+        cumulayive_joyo = load_joyo(level)
+        cumulative_included_joyo = [j for j in cumulayive_joyo if j in kanji_counts]
+        cumulative_well_tested_joyo = [j for j in cumulayive_joyo if (kanji_counts.get(j, 0) >= WELL_TESTING_THRESHOLD)]
 
-        included_joyo = [j for j in joyo if j in kanji_counts]
-        print(f"{len(included_joyo)}/{len(joyo)} Joyo up to level {level} are tested: {''.join(included_joyo)}")
+        print(f"{len(cumulative_well_tested_joyo)}/{len(cumulayive_joyo)} Joyo up to level {level} are well-tested")
+        print(f"{len(cumulative_included_joyo)}/{len(cumulayive_joyo)} Joyo up to level {level} are tested")
 
-        well_tested_joyo = [j for j in joyo if (kanji_counts.get(j, 0) >= 3)]
-        print(f"{len(well_tested_joyo)}/{len(joyo)} Joyo up to level {level} are well-tested: {''.join(well_tested_joyo)}")
+        level_included_joyo = [j for j in JOYO[level] if j in kanji_counts]
+        level_well_tested_joyo = sorted([j for j in JOYO[level] if kanji_counts.get(j, 0) >= WELL_TESTING_THRESHOLD])
+        level_poorly_tested_joyo = sorted(list(set(level_included_joyo) - set(level_well_tested_joyo)))
+        level_excluded_joyo = sorted([j for j in JOYO[level] if j not in kanji_counts])
 
-        excluded_joyo = [j for j in JOYO[level] if j not in kanji_counts]
-        if len(excluded_joyo) > 0:
-            print(f"{len(excluded_joyo)} excluded Joyo: {''.join(excluded_joyo)}")
+        if len(level_well_tested_joyo) > 0:
+            print(f"{len(level_well_tested_joyo)} well tested joyo: {''.join(level_well_tested_joyo)}")
+        if len(level_poorly_tested_joyo) > 0:
+            print(f"{len(level_poorly_tested_joyo)} poorly tested joyo: {''.join(level_poorly_tested_joyo)}")
+        if len(level_excluded_joyo) > 0:
+            print(f"{len(level_excluded_joyo)} excluded Joyo: {''.join(level_excluded_joyo)}")
 
         print()
 
