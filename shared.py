@@ -7,6 +7,7 @@ import re
 import sys
 from typing import Optional
 
+from bs4 import BeautifulSoup as bs
 import requests
 from tqdm import tqdm
 
@@ -241,4 +242,21 @@ def all_exercises(course: str, force_reload: bool = False) -> list[Exercise]:
     return exercises
 
 
-all_exercises('ind-eng')
+def get_wiktionary_section(word: str, language: str):
+    res = requests.get(f"https://en.wiktionary.org/wiki/{word}")
+    soup = bs(res.text, "html.parser")
+
+    out = []
+
+    in_language = False
+    for child in soup.find("div", {"class": "mw-parser-output"}).children:
+        if child.name == "h2":
+            if in_language:
+                return out
+            elif child.span.text == language:
+                in_language = True
+
+        if in_language:
+            out.append(child)
+
+    return out

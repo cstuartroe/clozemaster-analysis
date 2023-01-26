@@ -1,4 +1,6 @@
 import argparse
+import json
+import re
 from dataclasses import dataclass
 from enum import Enum
 from functools import cached_property
@@ -9,7 +11,7 @@ from typing import Callable, Iterable, Optional
 from bs4 import BeautifulSoup as bs
 import requests
 
-from shared import Exercise, all_exercises, TokenManager
+from shared import Exercise, all_exercises, TokenManager, get_wiktionary_section
 
 
 def load_secondary_joyo():
@@ -161,32 +163,70 @@ TRANSCRIPTION_REPLACEMENTS = {
 }
 
 
-def transcription(s: str) -> str:
-    return TRANSCRIPTION_REPLACEMENTS.get(s, s)
-
-
-def kana_table(table) -> dict[str, str]:
+def phonemic_kana_table(table) -> dict[str, str]:
     return {
-        kana: transcription(c + VOWELS[i])
+        kana: c + VOWELS[i]
         for c, kanas in table.items()
         for i, kana in enumerate(kanas)
         if kana != ' '
     }
 
 
-HIRAGANA_TRANSCRIPTIONS: dict[str, str] = {
-    **kana_table(HIRAGANA_TABLE),
+def transcription(s: str) -> str:
+    return TRANSCRIPTION_REPLACEMENTS.get(s, s)
+
+
+def replace_table(table) -> dict[str, str]:
+    return {
+        k: transcription(v)
+        for k, v in table.items()
+    }
+
+
+PHONEMIC_HIRAGANA_TRANSCRIPTIONS: dict[str, str] = {
+    **phonemic_kana_table(HIRAGANA_TABLE),
     'ん': 'N',
     'っ': 'Q',
 }
 
 
-KATAKANA_TRANSCRIPTIONS: dict[str, str] = {
-    **kana_table(KATAKANA_TABLE),
+HIRAGANA_TRANSCRIPTIONS: dict[str, str] = replace_table(PHONEMIC_HIRAGANA_TRANSCRIPTIONS)
+
+
+KATAKANA_TRANSCRIPTIONS: dict[str, str] = replace_table({
+    **phonemic_kana_table(KATAKANA_TABLE),
     'ン': 'N',
     'ッ': 'Q',
     'ー': 'chōonpu',
-}
+})
+
+
+def phonemic_transcribe_hiragana(s: str) -> str:
+    out = ''
+    for c in s:
+        t = PHONEMIC_HIRAGANA_TRANSCRIPTIONS[c]
+        prev = out[-1] if out else None
+        if t[0] == '-':
+            if t[1] == 'y':
+                assert prev == 'i'
+                out = out[:-1] + t[1:]
+            else:
+                raise ValueError(f"Unknown continuation character: {s}")
+        else:
+            if t[0] in 'aiueo' and prev == 'N':
+                out += '\''
+            elif out and prev == 'Q':
+                assert t[0] in 'ksctp'
+                out = out[:-1] + t[0]
+
+            out += t
+
+    return out
+
+
+def parse_onset(transription: str) -> tuple[str, str]:
+    onset = re.match('[kgsztdcjnhfpbmyrw]*', transription).group()
+    return onset, transription[len(onset):]
 
 
 class CharacterType(Enum):
@@ -402,6 +442,104 @@ def is_regular_reading(kanji: str, multi_kanji_reading: str, one_kanji_readings:
                         return True
 
     return False
+
+
+WIKTIONARY_READINGS_FILE = "wiktionary_readings.json"
+
+WiktionaryReadings: dict[str, dict[str, list[str]]] = {}
+if os.path.isfile(WIKTIONARY_READINGS_FILE):
+    with open(WIKTIONARY_READINGS_FILE, "r") as fh:
+        WiktionaryReadings = json.load(fh)
+
+
+def wiktionary_readings(c: str) -> dict[str, list[str]]:
+    assert len(c) == 1
+
+    if c in WiktionaryReadings:
+        return WiktionaryReadings[c]
+
+    section = get_wiktionary_section(c, "Japanese")
+    out = {}
+    in_readings = False
+    for e in section:
+        if e.name == "h4" and e.span.text == "Readings":
+            in_readings = True
+
+        elif e.name == "ul" and in_readings:
+            for li in e.find_all("li"):
+                if li.b is None:
+                    if not li.attrs.get("class") == ['mw-empty-elt']:
+                        print(c)
+                    continue
+
+                rs = []
+                for reading in li.span.find_all("i", {"class": "Hira mention"}, recursive=False):
+                    rs.append(reading.text)
+                for joyo in li.span.find_all("mark", {"class": "jouyou-reading"}):
+                    rs.append(joyo.i.text)
+
+                for reading in rs:
+                    if not all(ctype(kana) is CharacterType.HIRAGANA for kana in reading):
+                        print(c, reading)
+                        rs.remove(reading)
+
+                out[li.b.text] = rs
+
+            break
+
+    WiktionaryReadings[c] = out
+    with open(WIKTIONARY_READINGS_FILE, "w") as fh:
+        json.dump(WiktionaryReadings, fh, indent=2, sort_keys=True, ensure_ascii=False)
+
+    return out
+
+
+CSV_ONSETS_NO_Y = ("", "k", "g", "s", "z", "t", "d", "n", "h", "b", "m", "y", "r", "w")
+CSV_ONSETS = []
+for o in CSV_ONSETS_NO_Y:
+    CSV_ONSETS.append(o)
+    if o not in ("", "d", "y", "w"):
+        CSV_ONSETS.append(o + "y")
+
+
+CSV_FINALS = []
+for v in "aiueo":
+    for end in ("", "ki", "ku", "ti", "tu", "N"):
+        CSV_FINALS.append(v + end)
+for diphthong in ["ai", "ei", "ou", "uu", "ui"]:
+    i = CSV_FINALS.index(diphthong[0])
+    CSV_FINALS.insert(i+1, diphthong)
+
+
+ONSET_RESPELLINGS = {
+    "sy": "sh",
+    "zy": "j",
+    "ty": "ch",
+}
+
+
+def make_readings_csv(title: str, readings: list[str], separator=','):
+    pairs = {}
+
+    for reading in readings:
+        onset, final = parse_onset(phonemic_transcribe_hiragana(reading))
+        if onset not in CSV_ONSETS or final not in CSV_FINALS:
+            print(reading, phonemic_transcribe_hiragana(reading))
+        else:
+            pairs[(onset, final)] = pairs.get((onset, final), 0) + 1
+
+    content = separator.join(['', *[ONSET_RESPELLINGS.get(o, o) for o in CSV_ONSETS]]) + "\n"
+    for final in CSV_FINALS:
+        content += final.replace("tu", "tsu").replace("ti", "chi").replace("N", "n")
+        for onset in CSV_ONSETS:
+            content += separator
+            if (onset, final) in pairs:
+                content += str(pairs[(onset, final)])
+        content += '\n'
+
+    os.makedirs('readings', exist_ok=True)
+    with open(f"readings/{title}.csv", "w") as fh:
+        fh.write(content)
 
 
 @dataclass
@@ -718,6 +856,39 @@ def to_play_histogram(el: ExerciseList):
           f"/{len(current_counts)} eventually well-tested")
 
 
+def all_wiktionary_readings(el: ExerciseList):
+    kanji = set()
+
+    for e in el.exercises:
+        for c in e.sentence():
+            if ctype(c) is CharacterType.KANJI:
+                kanji.add(c)
+
+    for c in load_joyo(7):
+        kanji.add(c)
+
+    readings_by_type = {}
+    for c in tqdm(list(kanji)):
+        for reading_type, readings in wiktionary_readings(c).items():
+            if reading_type not in readings_by_type:
+                readings_by_type[reading_type] = []
+
+            readings_by_type[reading_type] += readings
+
+    for rt in sorted(list(readings_by_type.keys()), key=lambda t: -len(readings_by_type[t])):
+        print(rt)
+
+        readings = readings_by_type[rt]
+
+        print(f"{len(readings)} readings")
+        print(f"{len(set(readings))} distinct readings")
+
+        if rt.endswith("-on"):
+            make_readings_csv(rt, readings)
+
+        print()
+
+
 def reload_sentences(_: ExerciseList):
     exercises = all_exercises('jpn-eng', force_reload=True)
     print(f"{len(exercises)} sentences downloaded.")
@@ -738,6 +909,7 @@ DISPATCH_TABLE: dict[str, Callable[[ExerciseList, ...], None]] = {
     'contain': containing,
     'played': played_pattern,
     'to_play': to_play_histogram,
+    "wiktionary_readings": all_wiktionary_readings,
 }
 
 

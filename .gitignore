@@ -5,4 +5,5 @@ exercises
 session.sh
 frequency
 tokens.json
-
+wiktionary_readings.json
+readings
