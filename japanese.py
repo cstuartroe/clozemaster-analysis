@@ -6,7 +6,7 @@ from enum import Enum
 from functools import cached_property
 import os
 from tqdm import tqdm
-from typing import Callable, Iterable, Optional
+from typing import Callable, Iterable, Optional, Union
 
 from bs4 import BeautifulSoup as bs
 import requests
@@ -290,6 +290,23 @@ def load_joyo(max_level=6) -> set[str]:
             return out
 
 
+@dataclass
+class Reading:
+    kanji: str
+    kana: Optional[str]
+
+    def __post_init__(self):
+        assert all((ctype(c) is CharacterType.KANJI or c == '々') for c in self.kanji)
+        if self.kana:
+            assert all((ctype(c) is CharacterType.HIRAGANA or c == 'ー') for c in self.kana)
+
+    def __str__(self):
+        return f"{self.kanji}【{self.kana}】"
+
+    def __hash__(self):
+        return str(self).__hash__()
+
+
 class ReadingsParser:
     def __init__(self, e: Exercise):
         self.pronunciation = e.pronunciation
@@ -300,7 +317,7 @@ class ReadingsParser:
             return self.pronunciation[self.i]
         return None
 
-    def parse(self) -> Iterable[tuple[str, str]]:
+    def parse(self) -> Iterable[Reading]:
         self.i = 0
         while self.i < len(self.pronunciation):
             if ctype(self.next()) is CharacterType.KANJI:
@@ -308,7 +325,7 @@ class ReadingsParser:
             else:
                 self.i += 1
 
-    def grab_reading(self):
+    def grab_reading(self) -> Reading:
         assert ctype(self.next()) is CharacterType.KANJI
 
         kanji, kana = '', ''
@@ -319,7 +336,7 @@ class ReadingsParser:
 
         if self.next() != '【':
             # print(f"Warning: kanji {kanji} does not have reading: {self.pronunciation}")
-            return kanji, None
+            return Reading(kanji, None)
         self.i += 1
 
         while self.next() != '】':
@@ -330,7 +347,11 @@ class ReadingsParser:
         # if not all(ctype(c) is CharacterType.HIRAGANA for c in kana):
         #     print(f"Warning: not all hiragana: {kana}")
 
-        return kanji, kana
+        return Reading(kanji, kana)
+
+
+Collectible = Union[str, Reading]
+Occurrences = dict[Collectible, list[Exercise]]
 
 
 @dataclass
@@ -339,65 +360,64 @@ class ExerciseList:
     words: bool
 
     @cached_property
-    def strings(self) -> list[str]:
-        mapf = (lambda e: e.word()) if args.words else (lambda e: e.sentence())
-        return list(map(mapf, self.exercises))
-
-    @cached_property
-    def ccounts(self) -> dict[CharacterType, dict[str, int]]:
-        out: dict[CharacterType, dict[str, int]] = {
+    def ccounts(self) -> dict[CharacterType, Occurrences]:
+        out: dict[CharacterType, Occurrences] = {
             ct: {}
             for ct in CharacterType
         }
 
-        for s in self.strings:
+        for e in self.exercises:
+            s = e.string(self.words)
             for c in s:
                 ct = ctype(c)
-                out[ct][c] = out[ct].get(c, 0) + 1
+                if c not in out[ct]:
+                    out[ct][c] = []
+                out[ct][c].append(s)
 
         return out
 
     @cached_property
     def ctype_counts(self) -> dict[CharacterType, int]:
         return {
-            ct: sum(count for count in self.ccounts[ct].values())
+            ct: sum(len(exercises) for exercises in self.ccounts[ct].values())
             for ct in CharacterType
         }
 
     @cached_property
-    def readings(self) -> dict[tuple[str, str], list[Exercise]]:
-        if self.words:
-            raise ValueError("Readings not supported for words yet.")
-
-        out: dict[tuple[str, str], list[Exercise]] = {}
+    def readings(self) -> Occurrences:
+        out: dict[Reading, list[Exercise]] = {}
 
         for e in self.exercises:
-            for pair in ReadingsParser(e).parse():
-                out[pair] = out.get(pair, []) + [e]
+            for reading in ReadingsParser(e).parse():
+                if reading not in out:
+                    out[reading] = []
+                out[reading].append(e)
 
         return out
 
     @cached_property
-    def readings_by_character(self) -> dict[str, list[tuple[str, str, list[Exercise]]]]:
-        out: dict[str, list[tuple[str, str, list[Exercise]]]] = {}
+    def readings_by_character(self) -> dict[str, list[tuple[Reading, list[Exercise]]]]:
+        out: dict[str, list[tuple[Reading, list[Exercise]]]] = {}
 
-        for (kanji, kana), exercises in self.readings.items():
-            for c in kanji:
-                out[c] = out.get(c, [])
-                out[c].append((kanji, kana, exercises))
+        for reading, exercises in self.readings.items():
+            for c in reading.kanji:
+                if c not in out:
+                    out[c] = []
+                out[c].append((reading, exercises))
 
         for l in out.values():
-            l.sort(key=lambda x: len(x[2]))
+            l.sort(key=lambda x: len(x[1]))
 
         return out
 
     @cached_property
-    def lemmas(self) -> dict[str, list[Exercise]]:
-        out: dict[str, list[Exercise]] = {}
+    def lemmas(self) -> Occurrences:
+        out: Occurrences = {}
 
         for e in tqdm(self.exercises):
-            for t in e.tokens():
-                out[t.lemma] = out.get(t.lemma, [])
+            for t in e.tokens:
+                if t.lemma not in out:
+                    out[t.lemma] = []
                 out[t.lemma].append(e)
 
         TokenManager.write()
@@ -405,6 +425,16 @@ class ExerciseList:
         del out[None]
 
         return out
+
+    def get_occurrences(self, collection_type: str):
+        collection_type = collection_type.upper()
+
+        if collection_type == "LEMMAS":
+            return self.lemmas
+        elif collection_type == "READINGS":
+            return self.readings
+        else:
+            return self.ccounts[CharacterType[collection_type]]
 
 
 Readings = dict[str, dict[str, int]]
@@ -568,7 +598,10 @@ class ReadingsAnalysis:
 
 
 def joyo_stats(el: ExerciseList):
-    kanji_counts = el.ccounts[CharacterType.KANJI]
+    kanji_counts = {
+        k: len(exercises)
+        for k, exercises in el.ccounts[CharacterType.KANJI].items()
+    }
     print(f"{len(kanji_counts)} kanji\n")
 
     for level in JOYO.keys():
@@ -608,22 +641,24 @@ def export_frequencies(el: ExerciseList):
                 fh.write(f"{w}\t{f}\n")
 
 
-def print_most_common(el: ExerciseList, ctype: str, limit: str = '100'):
-    ctype = CharacterType[ctype.upper()]
-
-    most_common = sorted(
-        el.ccounts[ctype].items(),
-        key=lambda x: x[1],
+def print_most_common(el: ExerciseList, collection_type: str, limit: str = '100'):
+    occurrences = sorted(
+        el.get_occurrences(collection_type).items(),
+        key=lambda x: len(x[1]),
     )
+    limit = min(int(limit), len(occurrences))
 
-    for i in range(min(int(limit), len(most_common)), 0, -1):
-        c, count = most_common[-i]
-        print(f'{i:>5} {c} {count:>26}')
+    for i, (collectible, exercises) in enumerate(occurrences[-limit:]):
+        print(f"{limit - i:>4} {len(exercises):>4} {collectible}")
 
-    print(f"{len(most_common)} total {ctype.value}")
+    print(f"{len(occurrences)} total {collection_type} ({len(occurrences)/len(el.exercises):.2f} per exercise)")
 
-    well_tested = [(x, count) for x, count in most_common if count >= WELL_TESTING_THRESHOLD]
-    print(f"{len(well_tested)} well tested {ctype.value}")
+    well_tested = [
+        (o, exercises)
+        for o, exercises in occurrences
+        if len(exercises) >= WELL_TESTING_THRESHOLD
+    ]
+    print(f"{len(well_tested)} well-tested {collection_type} ({len(well_tested)/len(el.exercises):.2f} per exercise)")
 
 
 def run_survey(ctype: CharacterType, chars: list[str], sample: int = 1):
@@ -675,50 +710,13 @@ NORMAL_CTYPES = (CharacterType.KANJI, CharacterType.HIRAGANA, CharacterType.KATA
 
 
 def print_nonstandard(el: ExerciseList):
-    for s in el.strings:
+    for e in el.exercises:
+        s = e.string(el.words)
         nonstandard = [c for c in s if ctype(c) not in NORMAL_CTYPES]
         if nonstandard:
             print(s)
             print(','.join(nonstandard))
             print()
-
-
-def common_readings(el: ExerciseList, limit: str = '100'):
-    readings = sorted(el.readings.items(), key=lambda x: len(x[1]))
-    limit = min(int(limit), len(readings))
-
-    for i, ((kanji, kana), exercises) in enumerate(readings[-limit:]):
-        print(f"{limit - i:>4} {kanji:＿<4} {str(kana):＿<6} {len(exercises):>4}")
-
-    print(f"{len(readings)} total readings ({len(readings)/len(el.exercises):.2f} per exercise)")
-
-    well_tested_readings = [
-        (r, exercises)
-        for r, exercises in readings
-        if len(exercises) >= WELL_TESTING_THRESHOLD
-    ]
-    print(f"{len(well_tested_readings)} well-tested readings "
-          f"({len(well_tested_readings)/len(el.exercises):.2f} per exercise)")
-
-
-def common_lemmas(el: ExerciseList, limit: str = 100):
-    lemmas = sorted(el.lemmas.items(), key=lambda x: len(x[1]))
-
-    limit = min(int(limit), len(lemmas))
-
-    for i, (lemma, exercises) in enumerate(lemmas[-limit:]):
-        print(f'{limit - i:>6} {lemma:＿<4} {len(exercises):>6}')
-
-    print(f"{len(lemmas)} total lemmas ({len(lemmas)/len(el.exercises):.2f} per exercise)")
-
-    well_tested_lemmas = [
-        (l, exercises)
-        for l, exercises in lemmas
-        if len(exercises) >= WELL_TESTING_THRESHOLD
-    ]
-
-    print(f"{len(well_tested_lemmas)} well-tested lemmas "
-          f"({len(well_tested_lemmas) / len(el.exercises):.2f} per exercise)")
 
 
 def reading_analysis(el: ExerciseList, limit: str = '100'):
@@ -746,11 +744,12 @@ def reading_analysis(el: ExerciseList, limit: str = '100'):
 
 
 def containing(el: ExerciseList, substring: str, limit: str = '100'):
-    for e, s in zip(el.exercises, el.strings):
+    for e in el.exercises:
+        s = e.string(el.words)
         if substring in s:
             print(e.text)
             print(e.pronunciation)
-            print(e.tokens())
+            print(e.tokens)
             print(e.translation)
             print()
 
@@ -795,10 +794,10 @@ def latex(el: ExerciseList):
             "\\bigskip\n\n"
         )
 
-        for kanji, kana, exercises in el.readings_by_character[character][::-1]:
+        for reading, exercises in el.readings_by_character[character][::-1]:
             content += (
                 f"\\noindent \\begin{{CJK}}{{UTF8}}{{{CJK_FONT}}}"
-                f"{kanji}　【{kana}】"
+                f"{reading.kanji}　【{reading.kana}】"
                 "\\end{CJK}\n"
                 f"{len(exercises)} occurrence{'s' if len(exercises) > 1 else ''}\n\n"
                 "\\bigskip\n\n"
@@ -831,13 +830,13 @@ def to_play_histogram(el: ExerciseList):
     for e in el.exercises:
         if e.numPlayed == 0:
             continue
-        for t in e.tokens():
+        for t in e.tokens:
             current_counts[t.lemma] = current_counts.get(t.lemma, 0) + 1
     del current_counts[None]
 
     total_counts = {}
     for e in el.exercises:
-        for t in e.tokens():
+        for t in e.tokens:
             total_counts[t.lemma] = total_counts.get(t.lemma, 0) + 1
     del total_counts[None]
 
@@ -860,7 +859,7 @@ def all_wiktionary_readings(el: ExerciseList):
     kanji = set()
 
     for e in el.exercises:
-        for c in e.sentence():
+        for c in e.sentence:
             if ctype(c) is CharacterType.KANJI:
                 kanji.add(c)
 
@@ -901,8 +900,6 @@ DISPATCH_TABLE: dict[str, Callable[[ExerciseList, ...], None]] = {
     'nonstandard': print_nonstandard,
     'export': export_frequencies,
     'common': print_most_common,
-    'readings': common_readings,
-    'lemmas': common_lemmas,
     'reading_analysis': reading_analysis,
     'survey': survey,
     'latex': latex,

@@ -1,5 +1,6 @@
 import time
 from dataclasses import dataclass, asdict
+from functools import cached_property
 import json
 import math
 import os
@@ -143,6 +144,7 @@ class Exercise:
     clozeSentenceUrl: str
     _tokens: Optional[list[Token]] = None
 
+    @cached_property
     def word(self):
         m = re.search("\{\{([^}]+)}}", self.text)
 
@@ -151,14 +153,23 @@ class Exercise:
 
         return m.group(1)
 
+    @cached_property
     def sentence(self):
         return self.text.replace("{{", "").replace("}}", "")
 
+    @cached_property
     def tokens(self) -> list[Token]:
         if self._tokens is None:
             self._tokens = TokenManager.get_tokens(self.collectionId, self.id)
 
         return self._tokens
+
+    def string(self, word: bool):
+        return self.word if word else self.sentence
+
+    def __hash__(self):
+        return hash(self.id)
+
 
 
 @dataclass
