@@ -9,6 +9,7 @@ from tqdm import tqdm
 from typing import Callable, Iterable, Optional, Union
 
 from bs4 import BeautifulSoup as bs
+import regex
 import requests
 
 from shared import Exercise, all_exercises, TokenManager, get_wiktionary_section
@@ -227,6 +228,65 @@ def phonemic_transcribe_hiragana(s: str) -> str:
 def parse_onset(transription: str) -> tuple[str, str]:
     onset = re.match('[kgsztdcjnhfpbmyrw]*', transription).group()
     return onset, transription[len(onset):]
+
+
+ROMAJI_MORAS_TO_HIRAGANA = {
+    v: k
+    for k, v in HIRAGANA_TRANSCRIPTIONS.items()
+    if k not in 'づぢ'
+}
+for cons in 'szth':
+    i_syll = cons + 'i'
+    if i_syll in TRANSCRIPTION_REPLACEMENTS:
+        i_syll = TRANSCRIPTION_REPLACEMENTS[i_syll]
+        onset_romaji = i_syll[:-1]
+    else:
+        onset_romaji = cons + 'y'
+
+    for kana, vowel in zip(HIRAGANA_TABLE['-y'], VOWELS):
+        if kana == ' ':
+            continue
+        ROMAJI_MORAS_TO_HIRAGANA[onset_romaji + vowel] = ROMAJI_MORAS_TO_HIRAGANA[i_syll] + kana
+
+
+def romaji_coda_to_hiragana(c: str) -> str:
+    if c == 'n':
+        return ROMAJI_MORAS_TO_HIRAGANA['N']
+    elif c in 'kstp':
+        return ROMAJI_MORAS_TO_HIRAGANA['Q']
+    else:
+        raise ValueError(f"Malformed coda: {c}")
+
+
+LONG_VOWELS = {
+    'ā': 'a',
+    'ē': 'e',
+    'ī': 'i',
+    'ō': 'o',
+    'ū': 'u',
+}
+
+
+def romaji_to_hiragana(romaji: str) -> str:
+    match = regex.fullmatch("(([kgsztdcjnhfpbmyrw]*)[aeiouāēīōū])+([nkstp]?)", romaji)
+    if not match:
+        raise ValueError(f"Malformatted romaji: {romaji}")
+
+    out = ''
+    for syllable in match.captures(1):
+        if syllable[-1] in LONG_VOWELS:
+            short_vowel = LONG_VOWELS[syllable[-1]]
+            out += romaji_to_hiragana(syllable[:-1] + short_vowel) + ROMAJI_MORAS_TO_HIRAGANA[short_vowel]
+        elif syllable in ROMAJI_MORAS_TO_HIRAGANA:
+            out += ROMAJI_MORAS_TO_HIRAGANA[syllable]
+        elif syllable[1:] in ROMAJI_MORAS_TO_HIRAGANA:
+            out += romaji_coda_to_hiragana(syllable[0]) + ROMAJI_MORAS_TO_HIRAGANA[syllable[1:]]
+        else:
+            raise ValueError(f"Malformatted syllable: {syllable}")
+    if match.group(3):
+        out += romaji_coda_to_hiragana(match.group(3))
+
+    return out
 
 
 class CharacterType(Enum):
@@ -482,6 +542,40 @@ if os.path.isfile(WIKTIONARY_READINGS_FILE):
         WiktionaryReadings = json.load(fh)
 
 
+LONG_O_CHARS = 'おう'
+ZU_CHARS = 'ずづ'
+JI_CHARS = 'じぢ'
+
+
+def match_conforming(prefix: str, word: str) -> tuple[str, bool]:
+    if len(prefix) > len(word):
+        return prefix, False
+
+    conformed_prefix = ''
+    for pc, wc in zip(prefix, word):
+        if pc == wc:
+            pass
+
+        elif pc in LONG_O_CHARS and wc in LONG_O_CHARS and conformed_prefix and HIRAGANA_TRANSCRIPTIONS[conformed_prefix[-1]].endswith('o'):
+            pass
+
+        elif pc in ZU_CHARS and wc in ZU_CHARS:
+            pass
+
+        elif pc in JI_CHARS and wc in JI_CHARS:
+            pass
+
+        else:
+            return prefix, False
+
+        conformed_prefix += wc
+
+    if conformed_prefix != prefix:
+        print(f"Conformed prefix: {prefix} {word} > {conformed_prefix}")
+
+    return conformed_prefix, True
+
+
 def wiktionary_readings(c: str) -> dict[str, list[str]]:
     assert len(c) == 1
 
@@ -499,19 +593,42 @@ def wiktionary_readings(c: str) -> dict[str, list[str]]:
             for li in e.find_all("li"):
                 if li.b is None:
                     if not li.attrs.get("class") == ['mw-empty-elt']:
-                        print(c)
+                        print(f"Unexpected li: {c}")
                     continue
 
-                rs = []
+                reading_elems = []
                 for reading in li.span.find_all("i", {"class": "Hira mention"}, recursive=False):
-                    rs.append(reading.text)
+                    reading_elems.append(reading)
                 for joyo in li.span.find_all("mark", {"class": "jouyou-reading"}):
-                    rs.append(joyo.i.text)
+                    reading_elems.append(joyo.i)
 
-                for reading in rs:
+                rs = []
+                for kana_reading in reading_elems:
+                    romaji_reading = kana_reading
+                    while romaji_reading is not None:
+                        if ((getattr(romaji_reading, "attrs", None) is not None) and
+                                (romaji_reading.attrs.get("class", None) == ["mention-tr", "tr"])):
+                            break
+
+                        romaji_reading = romaji_reading.next_sibling
+
+                    if romaji_reading is None:
+                        print(f"Malformed Wiktionary page for {c}: {romaji_reading}")
+                        continue
+
+                    if romaji_reading.u is None:
+                        reading = kana_reading.text
+                    else:
+                        reading = romaji_to_hiragana(romaji_reading.u.text)
+                        reading, matches = match_conforming(reading, kana_reading.text)
+                        if not matches:
+                            raise ValueError(f"Mismatched hiragana: {kana_reading.text} {reading} {romaji_reading.u}")
+
                     if not all(ctype(kana) is CharacterType.HIRAGANA for kana in reading):
-                        print(c, reading)
-                        rs.remove(reading)
+                        print("Non-hiragana in reading:", c, reading)
+
+                    elif reading not in rs:
+                        rs.append(reading)
 
                 out[li.b.text] = rs
 
@@ -867,7 +984,7 @@ def all_wiktionary_readings(el: ExerciseList):
         kanji.add(c)
 
     readings_by_type = {}
-    for c in tqdm(list(kanji)):
+    for c in tqdm(sorted(list(kanji))):
         for reading_type, readings in wiktionary_readings(c).items():
             if reading_type not in readings_by_type:
                 readings_by_type[reading_type] = []
