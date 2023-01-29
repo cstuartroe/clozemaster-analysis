@@ -888,6 +888,28 @@ def all_wiktionary_readings(el: ExerciseList):
         print()
 
 
+def coverage(el: ExerciseList, ctype: str):
+    all_el = ExerciseList(all_exercises("jpn-eng"), words=el.words)
+
+    occurrences = el.get_occurrences(collection_type=ctype)
+    all_occurrences = all_el.get_occurrences(collection_type=ctype)
+
+    seen_items = set(occurrences.keys())
+    well_tested_items = set(item for item, exercises in occurrences.items() if len(exercises) >= WELL_TESTING_THRESHOLD)
+
+    for title, item_set in (('tested', seen_items), ('well-tested', well_tested_items)):
+        total_occurrences = 0
+        occurrence_coverage = 0
+
+        for item, exercises in all_occurrences.items():
+            total_occurrences += len(exercises)
+            if item in item_set:
+                occurrence_coverage += len(exercises)
+
+        print(f"{occurrence_coverage}/{total_occurrences} ({100*occurrence_coverage/total_occurrences:<.1f}%)"
+              f" {ctype} usages are among {title} items.")
+
+
 def reload_sentences(_: ExerciseList):
     exercises = all_exercises('jpn-eng', force_reload=True)
     print(f"{len(exercises)} sentences downloaded.")
@@ -907,6 +929,7 @@ DISPATCH_TABLE: dict[str, Callable[[ExerciseList, ...], None]] = {
     'played': played_pattern,
     'to_play': to_play_histogram,
     "wiktionary_readings": all_wiktionary_readings,
+    "coverage": coverage,
 }
 
 
