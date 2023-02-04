@@ -1,28 +1,14 @@
-import time
+import sys
 from dataclasses import dataclass, asdict
-from functools import cached_property
+from functools import cached_property, cache
 import json
-import math
 import os
 import re
-import sys
-from typing import Optional
+from typing import Optional, Callable
 
-from bs4 import BeautifulSoup as bs
-import requests
 from tqdm import tqdm
 
-USER_AGENT = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36"
-SESSION_ID = os.getenv("SESSION_ID")
-
-HEADERS = {
-    "Cookie": f"_clozemaster_session={SESSION_ID}",
-    "Time-Zone-Offset-Hours": "0",
-    "User-Agent": USER_AGENT,
-}
-
-
-TOKENS_FILE = "tokens.json"
+from .networking import fetch_tokens, get_all_exercises
 
 
 @dataclass
@@ -30,6 +16,9 @@ class Token:
     text: str
     lemma: str
     pos: str
+
+
+TOKENS_FILE = "tokens.json"
 
 
 class _TokenManager:
@@ -50,12 +39,19 @@ class _TokenManager:
 
         self.unsaved_sentences: int = 0
 
-    def get_tokens(self, collection_id: int, sentence_id: int) -> list["Token"]:
+    def get_tokens(self, collection_id: int, sentence_id: int) -> list[Token]:
         if collection_id not in self.tokens:
             self.tokens[collection_id] = {}
 
         if sentence_id not in self.tokens[collection_id]:
-            self.fetch_tokens(collection_id, sentence_id)
+            self.tokens[collection_id][sentence_id] = [
+                Token(text=t["text"], lemma=t["lemma"]["text"], pos=t["posTag"]["label"])
+                for t in fetch_tokens(collection_id, sentence_id)
+            ]
+
+            self.unsaved_sentences += 1
+            if self.unsaved_sentences >= 100:
+                self.write()
 
         return self.tokens[collection_id][sentence_id]
 
@@ -72,33 +68,6 @@ class _TokenManager:
             json.dump(tokens_json, fh, indent=2, sort_keys=True)
 
         self.unsaved_sentences = 0
-
-    def fetch_tokens(self, collection_id: int, sentence_id: int, backoff: int = 5):
-        tokens_url = (
-            "https://www.clozemaster.com/api/v1/lp/120/tokens?"
-            f"collection_id={collection_id}"
-            f"&tokenizeable_id={sentence_id}"
-            "&tokenizeable_type=CollectionClozeSentence"
-        )
-
-        res = requests.get(url=tokens_url, headers=HEADERS)
-
-        if res.status_code == 429:
-            print(f"Rate limited fetching tokens, trying again in {backoff} seconds...")
-            time.sleep(backoff)
-            self.fetch_tokens(collection_id, sentence_id, backoff=backoff*2)
-            return
-
-        tokens = [
-            Token(text=t["text"], lemma=t["lemma"]["text"], pos=t["posTag"]["label"])
-            for t in res.json()["tokens"]
-        ]
-
-        self.tokens[collection_id][sentence_id] = tokens
-
-        self.unsaved_sentences += 1
-        if self.unsaved_sentences >= 100:
-            self.write()
 
 
 TokenManager = _TokenManager()
@@ -171,65 +140,16 @@ class Exercise:
         return hash(self.id)
 
 
-
-@dataclass
-class PageResponse:
-    exercises: list[Exercise]
-    per_page: int
-    total: int
-
-
-COURSE_IDS = {
-    "ind-eng": "2a500c99-960c-4865-b7d3-af4ec1db60a9",
-    "jpn-eng": "203e2a10-8fff-43ce-a25e-e1e2b0fe874b"
-}
-
-
-def get_page(course: str, page: int) -> PageResponse:
-    if SESSION_ID is None:
-        print("Please export a session key.")
-        sys.exit(1)
-
-    url = f"https://www.clozemaster.com/api/v1/lp/{course}/c/fluency-fast-track-{COURSE_IDS[course]}/ccs?page={page}"
-    res = requests.get(
-        url=url,
-        headers=HEADERS,
-    )
-
-    if res.status_code != 200:
-        raise RuntimeError(f"Request bounced: {res}")
-
-    # print(json.dumps(res.json(), indent=2))
-    content = res.json()
-    # print(content["page"])
-    per_page = content["perPage"]
-    total = content["total"]
-
-    exercises = [
-        Exercise(**d)
-        for d in content["collectionClozeSentences"]
-    ]
-
-    return PageResponse(exercises, per_page, total)
-
-
-def get_all(course: str) -> list[Exercise]:
-    res = get_page(course, 1)
-    exercises = [*res.exercises]
-
-    for page in tqdm(list(range(2, math.ceil(res.total / res.per_page) + 1))):
-        exercises += get_page(course, page).exercises
-
-    return exercises
-
-
 def all_exercises(course: str, force_reload: bool = False) -> list[Exercise]:
     os.makedirs("exercises", exist_ok=True)
 
     course_file = f"exercises/{course}.json"
 
     if force_reload or not os.path.exists(course_file):
-        exercises = get_all(course)
+        exercises = [
+            Exercise(**d)
+            for d in get_all_exercises(course)
+        ]
 
         with open(course_file, "w") as fh:
             json.dump(
@@ -253,21 +173,53 @@ def all_exercises(course: str, force_reload: bool = False) -> list[Exercise]:
     return exercises
 
 
-def get_wiktionary_section(word: str, language: str):
-    res = requests.get(f"https://en.wiktionary.org/wiki/{word}")
-    soup = bs(res.text, "html.parser")
+@dataclass
+class ExerciseList:
+    exercises: list[Exercise]
 
-    out = []
+    def __hash__(self):
+        return id(self)
 
-    in_language = False
-    for child in soup.find("div", {"class": "mw-parser-output"}).children:
-        if child.name == "h2":
-            if in_language:
-                return out
-            elif child.span.text == language:
-                in_language = True
+    @cache
+    def characters(self, words: bool, case: bool) -> dict[str, list[Exercise]]:
+        out: dict[str, list[Exercise]] = {}
+        for e in self.exercises:
+            for c in e.string(words):
+                if not case:
+                    c = c.lower()
+                if c not in out:
+                    out[c] = []
+                out[c].append(e)
+        return out
 
-        if in_language:
-            out.append(child)
+    @cached_property
+    def lemmas(self) -> dict[str, list[Exercise]]:
+        out: dict[str, list[Exercise]] = {}
 
-    return out
+        for e in tqdm(self.exercises):
+            for t in e.tokens:
+                if t.lemma not in out:
+                    out[t.lemma] = []
+                out[t.lemma].append(e)
+
+        TokenManager.write()
+
+        if None in out:
+            del out[None]
+
+        return out
+
+    def get_collection_getters(self, words: bool, case: bool) -> dict[str, Callable[[], dict[str, list[Exercise]]]]:
+        return {
+            "LEMMAS": lambda: self.lemmas,
+            "CHARACTERS": lambda: self.characters(words, case)
+        }
+
+    def get_counts(self, collection_type: str, words: bool, case: bool) -> dict[str, list[Exercise]]:
+        collection_type = collection_type.upper()
+        collection_getters = self.get_collection_getters(words, case)
+        if collection_type not in collection_getters:
+            print(f"Invalid collection type (choices: {', '.join(collection_getters.keys())})")
+            sys.exit(1)
+        return collection_getters[collection_type]()
+
