@@ -1,6 +1,6 @@
 import argparse
 
-from shared.lib.dataclasses import all_exercises, ExerciseList
+from shared.lib.dataclasses import all_exercises, Exercise, ExerciseList
 from shared.commands.base import (
     get_language_code, command, with_substring, with_words, with_limit, with_collection_type, with_case)
 
@@ -11,6 +11,17 @@ def reload_sentences(_el: ExerciseList, _namespace: argparse.ArgumentParser):
     print(f"{len(exercises)} sentences downloaded.")
 
 
+def contains(e: Exercise, q: str, words: bool, case: bool):
+    string = e.string(words)
+    translation = e.translation
+    if not case:
+        string = string.lower()
+        translation = translation.lower()
+        q = q.lower()
+    return (q in string) or (q in translation)
+
+
+@with_case
 @with_substring
 @with_words
 @with_limit
@@ -19,7 +30,7 @@ def containing(el: ExerciseList, namespace: argparse.Namespace):
     matching = [
         e
         for e in el.exercises
-        if namespace.substring in e.string(namespace.words)
+        if contains(e, namespace.substring, namespace.words, namespace.case)
     ]
 
     for e in matching[:namespace.limit]:
