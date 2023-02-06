@@ -133,6 +133,10 @@ class Exercise:
 
         return self._tokens
 
+    @cached_property
+    def whitespace_words(self) -> list[str]:
+        return re.findall("[a-zA-Z]+", self.sentence.strip())
+
     def string(self, word: bool):
         return self.word if word else self.sentence
 
@@ -209,10 +213,24 @@ class ExerciseList:
 
         return out
 
+    @cache
+    def whitespace_words(self, case: bool) -> dict[str, list[Exercise]]:
+        out: dict[str, list[Exercise]] = {}
+        for e in self.exercises:
+            for ww in e.whitespace_words:
+                if not case:
+                    ww = ww.lower()
+                if ww not in out:
+                    out[ww] = []
+                out[ww].append(e)
+
+        return out
+
     def get_collection_getters(self, words: bool, case: bool) -> dict[str, Callable[[], dict[str, list[Exercise]]]]:
         return {
             "LEMMAS": lambda: self.lemmas,
-            "CHARACTERS": lambda: self.characters(words, case)
+            "CHARACTERS": lambda: self.characters(words, case),
+            "WHITESPACE_WORDS": lambda: self.whitespace_words(case),
         }
 
     def get_counts(self, collection_type: str, words: bool, case: bool) -> dict[str, list[Exercise]]:
