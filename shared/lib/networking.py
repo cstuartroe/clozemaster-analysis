@@ -17,21 +17,13 @@ HEADERS = {
 }
 
 
-def fetch_tokens(collection_id: int, sentence_id: int, backoff: int = 5):
-    tokens_url = (
-        "https://www.clozemaster.com/api/v1/lp/120/tokens?"
-        f"collection_id={collection_id}"
-        f"&tokenizeable_id={sentence_id}"
-        "&tokenizeable_type=CollectionClozeSentence"
-    )
-
+def fetch_tokens(tokens_url: str, backoff: int = 5):
     res = requests.get(url=tokens_url, headers=HEADERS)
 
     if res.status_code == 429:
         print(f"Rate limited fetching tokens, trying again in {backoff} seconds...")
         time.sleep(backoff)
-        fetch_tokens(collection_id, sentence_id, backoff=backoff * 2)
-        return
+        return fetch_tokens(tokens_url, backoff=backoff * 2)
 
     return res.json()["tokens"]
 
@@ -45,7 +37,8 @@ class PageResponse:
 
 COURSE_IDS = {
     "ind-eng": "2a500c99-960c-4865-b7d3-af4ec1db60a9",
-    "jpn-eng": "203e2a10-8fff-43ce-a25e-e1e2b0fe874b"
+    "jpn-eng": "203e2a10-8fff-43ce-a25e-e1e2b0fe874b",
+    "fin-eng": "ca9b6fe2-66b7-4a88-bce0-e7b5fd52dbe2",
 }
 
 

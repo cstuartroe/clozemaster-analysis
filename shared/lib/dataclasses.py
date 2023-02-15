@@ -39,21 +39,21 @@ class _TokenManager:
 
         self.unsaved_sentences: int = 0
 
-    def get_tokens(self, collection_id: int, sentence_id: int) -> list[Token]:
-        if collection_id not in self.tokens:
-            self.tokens[collection_id] = {}
+    def get_tokens(self, e: "Exercise") -> list[Token]:
+        if e.collectionId not in self.tokens:
+            self.tokens[e.collectionId] = {}
 
-        if sentence_id not in self.tokens[collection_id]:
-            self.tokens[collection_id][sentence_id] = [
+        if e.id not in self.tokens[e.collectionId]:
+            self.tokens[e.collectionId][e.id] = [
                 Token(text=t["text"], lemma=t["lemma"]["text"], pos=t["posTag"]["label"])
-                for t in fetch_tokens(collection_id, sentence_id)
+                for t in fetch_tokens(e.tokensUrl)
             ]
 
             self.unsaved_sentences += 1
             if self.unsaved_sentences >= 100:
                 self.write()
 
-        return self.tokens[collection_id][sentence_id]
+        return self.tokens[e.collectionId][e.id]
 
     def write(self):
         tokens_json = {
@@ -129,13 +129,26 @@ class Exercise:
     @cached_property
     def tokens(self) -> list[Token]:
         if self._tokens is None:
-            self._tokens = TokenManager.get_tokens(self.collectionId, self.id)
+            self._tokens = TokenManager.get_tokens(self)
 
         return self._tokens
 
     @cached_property
-    def whitespace_words(self) -> list[str]:
-        return re.findall("[a-zA-Z]+", self.sentence.strip())
+    def words(self):
+        out = []
+        current_word = ""
+
+        for c in self.sentence:
+            if c.isalpha():
+                current_word += c
+            elif current_word != "":
+                out.append(current_word)
+                current_word = ""
+
+        if current_word != "":
+            out.append(current_word)
+
+        return out
 
     def string(self, word: bool):
         return self.word if word else self.sentence
@@ -214,10 +227,10 @@ class ExerciseList:
         return out
 
     @cache
-    def whitespace_words(self, case: bool) -> dict[str, list[Exercise]]:
+    def words(self, case: bool) -> dict[str, list[Exercise]]:
         out: dict[str, list[Exercise]] = {}
         for e in self.exercises:
-            for ww in e.whitespace_words:
+            for ww in e.words:
                 if not case:
                     ww = ww.lower()
                 if ww not in out:
@@ -230,7 +243,7 @@ class ExerciseList:
         return {
             "LEMMAS": lambda: self.lemmas,
             "CHARACTERS": lambda: self.characters(words, case),
-            "WHITESPACE_WORDS": lambda: self.whitespace_words(case),
+            "WORDS": lambda: self.words(case),
         }
 
     def get_counts(self, collection_type: str, words: bool, case: bool) -> dict[str, list[Exercise]]:

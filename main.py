@@ -9,6 +9,7 @@ from japanese.commands import COMMANDS as JAPANESE_COMMANDS
 LANGUAGE_COMMANDS = {
     "jpn": JAPANESE_COMMANDS,
     "ind": {},
+    "fin": {},
 }
 
 if __name__ == "__main__":

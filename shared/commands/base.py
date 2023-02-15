@@ -16,12 +16,11 @@ def get_command_name():
 
 EXERCISE_LIST_CLASSES = {
     "jpn": JapaneseExerciseList,
-    "ind": ExerciseList,
 }
 
 
 def command(func: Callable[[ExerciseList, argparse.Namespace], None]):
-    exercise_list_class = EXERCISE_LIST_CLASSES[get_language_code()]
+    exercise_list_class = EXERCISE_LIST_CLASSES.get(get_language_code(), ExerciseList)
 
     def wrapped_func(exercises: list[Exercise], parser: argparse.ArgumentParser, unparsed_args: list[str]):
         parser.add_argument('-p', '--playing', action='store_true', help='Limit to sentences which I am playing')
