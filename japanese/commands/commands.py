@@ -54,8 +54,12 @@ def joyo_stats(el: JapaneseExerciseList, namespace: argparse.Namespace):
         cumulative_included_joyo = [j for j in cumulayive_joyo if j in kanji_counts]
         cumulative_well_tested_joyo = [j for j in cumulayive_joyo if (kanji_counts.get(j, 0) >= namespace.threshold)]
 
-        print(f"{len(cumulative_well_tested_joyo)}/{len(cumulayive_joyo)} Joyo up to level {level} are well-tested")
-        print(f"{len(cumulative_included_joyo)}/{len(cumulayive_joyo)} Joyo up to level {level} are tested")
+        print(f"{len(cumulative_well_tested_joyo)}/{len(cumulayive_joyo)} "
+              f"({len(cumulative_well_tested_joyo)/len(cumulayive_joyo)*100:.1f}%) "
+              f"Joyo up to level {level} are well-tested")
+        print(f"{len(cumulative_included_joyo)}/{len(cumulayive_joyo)} "
+              f"({len(cumulative_included_joyo)/len(cumulayive_joyo)*100:.1f}%) "
+              f"Joyo up to level {level} are tested")
 
         level_included_joyo = [j for j in kanji_list if j in kanji_counts]
         level_well_tested_joyo = sorted([j for j in kanji_list if kanji_counts.get(j, 0) >= namespace.threshold])
