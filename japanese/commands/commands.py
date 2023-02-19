@@ -74,3 +74,22 @@ def joyo_stats(el: JapaneseExerciseList, namespace: argparse.Namespace):
             print(f"{len(level_excluded_joyo)} excluded Joyo: {''.join(level_excluded_joyo)}")
 
         print()
+
+
+@command
+def kanji_in_order(el: JapaneseExerciseList, _namespace: argparse.Namespace):
+    kanji_list = []
+    kanji_set = set()
+
+    for e in el.exercises:
+        for c in e.sentence:
+            if ctype(c) is CharacterType.KANJI and c not in kanji_set:
+                kanji_list.append(c)
+                kanji_set.add(c)
+
+    for i, c in enumerate(kanji_list):
+        print(c, end='')
+        if (i + 1) % 50 == 0:
+            print()
+
+    print()
