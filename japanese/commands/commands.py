@@ -40,6 +40,10 @@ def print_nonstandard(el: JapaneseExerciseList, namespace: argparse.Namespace):
             print()
 
 
+def percent_string(numerator: int, denominator: int) -> str:
+    return f"{numerator}/{denominator} ({numerator/denominator*100:.1f}%)"
+
+
 @with_words
 @command
 def joyo_stats(el: JapaneseExerciseList, namespace: argparse.Namespace):
@@ -54,11 +58,9 @@ def joyo_stats(el: JapaneseExerciseList, namespace: argparse.Namespace):
         cumulative_included_joyo = [j for j in cumulayive_joyo if j in kanji_counts]
         cumulative_well_tested_joyo = [j for j in cumulayive_joyo if (kanji_counts.get(j, 0) >= namespace.threshold)]
 
-        print(f"{len(cumulative_well_tested_joyo)}/{len(cumulayive_joyo)} "
-              f"({len(cumulative_well_tested_joyo)/len(cumulayive_joyo)*100:.1f}%) "
+        print(f"{percent_string(len(cumulative_well_tested_joyo), len(cumulayive_joyo))} "
               f"Joyo up to level {level} are well-tested")
-        print(f"{len(cumulative_included_joyo)}/{len(cumulayive_joyo)} "
-              f"({len(cumulative_included_joyo)/len(cumulayive_joyo)*100:.1f}%) "
+        print(f"{percent_string(len(cumulative_included_joyo), len(cumulayive_joyo))} "
               f"Joyo up to level {level} are tested")
 
         level_included_joyo = [j for j in kanji_list if j in kanji_counts]
@@ -67,11 +69,14 @@ def joyo_stats(el: JapaneseExerciseList, namespace: argparse.Namespace):
         level_excluded_joyo = sorted([j for j in kanji_list if j not in kanji_counts])
 
         if len(level_well_tested_joyo) > 0:
-            print(f"{len(level_well_tested_joyo)} well tested joyo: {''.join(level_well_tested_joyo)}")
+            print(f"{percent_string(len(level_well_tested_joyo), len(kanji_list))} "
+                  f"well tested joyo: {''.join(level_well_tested_joyo)}")
         if len(level_poorly_tested_joyo) > 0:
-            print(f"{len(level_poorly_tested_joyo)} poorly tested joyo: {''.join(level_poorly_tested_joyo)}")
+            print(f"{percent_string(len(level_poorly_tested_joyo), len(kanji_list))} "
+                  f"poorly tested joyo: {''.join(level_poorly_tested_joyo)}")
         if len(level_excluded_joyo) > 0:
-            print(f"{len(level_excluded_joyo)} excluded Joyo: {''.join(level_excluded_joyo)}")
+            print(f"{percent_string(len(level_excluded_joyo), len(kanji_list))} "
+                  f"excluded Joyo: {''.join(level_excluded_joyo)}")
 
         print()
 
