@@ -1,8 +1,9 @@
 import argparse
+import math
 
 from shared.lib.dataclasses import all_exercises, Exercise, ExerciseList
 from shared.commands.base import (
-    get_language_code, command, with_substring, with_words, with_limit, with_collection_type, with_case)
+    get_language_code, command, with_substring, with_words, with_limit, with_collection_type, with_case, with_arg)
 
 
 @command
@@ -87,6 +88,10 @@ def print_most_common(el: ExerciseList, namespace: argparse.Namespace):
           f" per exercise)")
 
 
+def histogram_bar(count: int, cap: int = 100):
+    return f"{'#'*min(count, cap)}{str(count) if count > cap else ''}"
+
+
 @command
 def to_play_histogram(el: ExerciseList, namespace: argparse.Namespace):
     current_counts = {}
@@ -108,9 +113,8 @@ def to_play_histogram(el: ExerciseList, namespace: argparse.Namespace):
         key=lambda x: x[1],
     )
 
-    cap = 100
     for lemma, count in played_total_counts:
-        print(f"{lemma:＿<6} {'#'*min(count, cap)}{str(count) if count > cap else ''}")
+        print(f"{lemma:＿<6} {histogram_bar(count)}")
 
     print(f"{len([l for l, c in current_counts.items() if c >= namespace.threshold])}"
           f"/{len(current_counts)} currently well-tested")
@@ -143,3 +147,22 @@ def coverage(el: ExerciseList, namespace: argparse.Namespace):
 
         print(f"{occurrence_coverage}/{total_occurrences} ({100*occurrence_coverage/total_occurrences:<.1f}%)"
               f" {namespace.collection_type} usages are among {title} items.")
+
+
+@with_case
+@with_words
+@with_collection_type
+@with_arg(lambda parser: parser.add_argument('-b', '--bin_size', type=int, required=False, default=60))
+@command
+def new_items(el: ExerciseList, namespace: argparse.Namespace):
+    seen_items = set()
+    for i in range(math.ceil(len(el.exercises)/namespace.bin_size)):
+        day_exercises = type(el)(el.exercises[i*namespace.bin_size:(i+1)*namespace.bin_size])
+        day_items = set(day_exercises.get_counts(collection_type=namespace.collection_type,
+                                                 words=namespace.words, case=namespace.case).keys())
+        if namespace.collection_type == "kanji":
+            graphic = ''.join(day_items - seen_items)
+        else:
+            graphic = histogram_bar(len(day_items - seen_items))
+        print(f"{i+1:<3} {graphic}")
+        seen_items = seen_items | day_items

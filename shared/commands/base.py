@@ -40,7 +40,7 @@ def command(func: Callable[[ExerciseList, argparse.Namespace], None]):
                 if e.numPlayed > 0
             ]
         elif namespace.num_sentences:
-            exercises = exercises[:namespace.num_sentences]
+            exercises = exercises[29:namespace.num_sentences+29]
 
         func(exercise_list_class(exercises), namespace)
 
