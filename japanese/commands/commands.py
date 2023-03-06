@@ -80,6 +80,16 @@ def joyo_stats(el: JapaneseExerciseList, namespace: argparse.Namespace):
 
         print()
 
+    all_joyo = joyo_up_to(7)
+    non_joyo_kanji = [j for j in kanji_counts if j not in all_joyo]
+    non_joyo_well_tested_kanji = [
+        j
+        for j, count in kanji_counts.items()
+        if (j not in all_joyo) and (count >= namespace.threshold)
+    ]
+    print(f"{len(non_joyo_kanji)} non-joyo kanji: {''.join(non_joyo_kanji)}")
+    print(f"{len(non_joyo_well_tested_kanji)} well-tested non-joyo kanji: {''.join(non_joyo_well_tested_kanji)}")
+
 
 @command
 def kanji_in_order(el: JapaneseExerciseList, _namespace: argparse.Namespace):
