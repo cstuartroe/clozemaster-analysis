@@ -134,6 +134,9 @@ class Reading:
         ideographic_space = '\u3000'
         return f"{self.kanji.ljust(2, ideographic_space)}【{self.kana}】"
 
+    def __len__(self):
+        return len(str(self))
+
     def __hash__(self):
         return str(self).__hash__()
 

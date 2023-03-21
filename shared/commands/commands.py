@@ -92,33 +92,29 @@ def histogram_bar(count: int, cap: int = 100):
     return f"{'#'*min(count, cap)}{str(count) if count > cap else ''}"
 
 
+@with_case
+@with_words
+@with_collection_type
 @command
 def to_play_histogram(el: ExerciseList, namespace: argparse.Namespace):
-    current_counts = {}
-    for e in el.exercises:
-        if e.numPlayed == 0:
-            continue
-        for t in e.tokens:
-            current_counts[t.lemma] = current_counts.get(t.lemma, 0) + 1
-    del current_counts[None]
+    played_exercises = type(el)([e for e in el.exercises if e.numPlayed > 0])
+    current_counts = played_exercises.get_counts(namespace.collection_type, namespace.words, namespace.case)
 
-    total_counts = {}
-    for e in el.exercises:
-        for t in e.tokens:
-            total_counts[t.lemma] = total_counts.get(t.lemma, 0) + 1
-    del total_counts[None]
+    total_counts = el.get_counts(namespace.collection_type, namespace.words, namespace.case)
 
     played_total_counts = sorted(
-        [(l, total_counts[l]) for l in current_counts.keys()],
-        key=lambda x: x[1],
+        [(k, total_counts[k]) for k in current_counts.keys()],
+        key=lambda x: len(x[1]),
     )
 
-    for lemma, count in played_total_counts:
-        print(f"{lemma:＿<6} {histogram_bar(count)}")
+    pad = max(map(len, current_counts.keys()))
 
-    print(f"{len([l for l, c in current_counts.items() if c >= namespace.threshold])}"
+    for k, exercises in played_total_counts:
+        print(f"{k.ljust(pad, '＿')} {histogram_bar(len(exercises))}")
+
+    print(f"{len([k for k, es in current_counts.items() if len(es) >= namespace.threshold])}"
           f"/{len(current_counts)} currently well-tested")
-    print(f"{len([l for l in current_counts.keys() if total_counts[l] >= namespace.threshold])}"
+    print(f"{len([k for k in current_counts.keys() if len(total_counts[k]) >= namespace.threshold])}"
           f"/{len(current_counts)} eventually well-tested")
 
 
@@ -160,7 +156,7 @@ def new_items(el: ExerciseList, namespace: argparse.Namespace):
         day_exercises = type(el)(el.exercises[i*namespace.bin_size:(i+1)*namespace.bin_size])
         day_items = set(day_exercises.get_counts(collection_type=namespace.collection_type,
                                                  words=namespace.words, case=namespace.case).keys())
-        if namespace.collection_type == "kanji":
+        if all(len(item) == 1 for item in day_items):
             graphic = ''.join(day_items - seen_items)
         else:
             graphic = histogram_bar(len(day_items - seen_items))
