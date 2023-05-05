@@ -82,6 +82,7 @@ class Exercise:
     commentsCount: int
     difficulty: None
     easinessFactor: None
+    explanation: None
     favorited: None
     hint: str
     id: int

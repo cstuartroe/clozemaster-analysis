@@ -29,13 +29,13 @@ def contains(e: Exercise, q: str, words: bool, case: bool):
 @command
 def containing(el: ExerciseList, namespace: argparse.Namespace):
     matching = [
-        e
-        for e in el.exercises
+        (i+1, e)
+        for i, e in enumerate(el.exercises)
         if contains(e, namespace.substring, namespace.words, namespace.case)
     ]
 
-    for e in matching[:namespace.limit]:
-        print(e.text)
+    for i, e in matching[:namespace.limit]:
+        print(f"#{i} {e.text}")
         print(e.pronunciation)
         print(e.tokens)
         print(e.translation)
@@ -152,13 +152,16 @@ def coverage(el: ExerciseList, namespace: argparse.Namespace):
 @command
 def new_items(el: ExerciseList, namespace: argparse.Namespace):
     seen_items = set()
+    el.exercises = el.exercises[29:]
     for i in range(math.ceil(len(el.exercises)/namespace.bin_size)):
         day_exercises = type(el)(el.exercises[i*namespace.bin_size:(i+1)*namespace.bin_size])
-        day_items = set(day_exercises.get_counts(collection_type=namespace.collection_type,
-                                                 words=namespace.words, case=namespace.case).keys())
+        day_items = day_exercises.get_counts(collection_type=namespace.collection_type,
+                                             words=namespace.words, case=namespace.case).keys()
+
+        new_items = [e for e in day_items if e not in seen_items]
         if all(len(item) == 1 for item in day_items):
-            graphic = ''.join(day_items - seen_items)
+            graphic = ''.join(new_items)
         else:
-            graphic = histogram_bar(len(day_items - seen_items))
-        print(f"{i+1:<3} {graphic}")
-        seen_items = seen_items | day_items
+            graphic = histogram_bar(len(new_items))
+        print(f"{i+1:<3} {len(new_items):<3} {graphic}")
+        seen_items = seen_items | set(day_items)
