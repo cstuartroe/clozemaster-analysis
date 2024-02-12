@@ -6,6 +6,7 @@ from .commands import (
     coverage,
     to_play_histogram,
     new_items,
+    sample_sentences,
 )
 from .survey import survey
 from .zipf import zipf
@@ -20,4 +21,5 @@ COMMANDS = {
     "coverage": coverage,
     "zipf": zipf,
     "new": new_items,
+    'sample': sample_sentences,
 }

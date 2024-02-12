@@ -1,5 +1,6 @@
 import argparse
 import math
+import random
 
 from shared.lib.dataclasses import all_exercises, Exercise, ExerciseList
 from shared.commands.base import (
@@ -35,7 +36,7 @@ def containing(el: ExerciseList, namespace: argparse.Namespace):
     ]
 
     for i, e in matching[:namespace.limit]:
-        print(f"#{i} {e.text}")
+        print(f"#{i+1} {e.text}")
         print(e.pronunciation)
         print(e.tokens)
         print(e.translation)
@@ -56,7 +57,7 @@ def played_pattern(el: ExerciseList, _namespace: argparse.Namespace):
             c = '#'
             played += 1
         print(c, end='')
-        if i % 60 == 59:
+        if i % 60 == 59 or i == len(el.exercises) - 1:
             print(f" {played}/{total}")
 
     print()
@@ -165,3 +166,26 @@ def new_items(el: ExerciseList, namespace: argparse.Namespace):
             graphic = histogram_bar(len(new_items))
         print(f"{i+1:<3} {len(new_items):<3} {graphic}")
         seen_items = seen_items | set(day_items)
+
+
+@with_arg(lambda parser: parser.add_argument('-r', '--range', type=int, nargs='+', default=None))
+@with_arg(lambda parser: parser.add_argument('-s', '--size', type=int, default=100, help='Sample size'))
+@command
+def sample_sentences(el: ExerciseList, namespace: argparse.Namespace):
+    erange = namespace.range
+    if erange == None:
+        erange = (0, len(el.exercises))
+    elif len(erange) != 2:
+        raise ValueError("Range should consist of exactly two integers.")
+
+    start, end = erange
+
+    exercises = list(enumerate(el.exercises))[start:end]
+    random.shuffle(exercises)
+
+    for i, e in sorted(exercises[:namespace.size]):
+        print(f"#{i+1} {e.text}")
+        print(e.pronunciation)
+        print(e.tokens)
+        print(e.translation)
+        print()
