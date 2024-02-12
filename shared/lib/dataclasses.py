@@ -88,6 +88,7 @@ class Exercise:
     id: int
     idiom: None
     ignored: None
+    lastPlayedDate: str
     level: int
     moderated: bool
     multipleChoiceOptions: list
